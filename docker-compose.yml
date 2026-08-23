@@ -1,0 +1,65 @@
+# Local development stack: Postgres + Redis, matching the credentials
+# already expected by apps/web/.env.local. Not used for `pnpm dev` by
+# default (see apps/web/scripts/dev-redis.mjs / packages/db/scripts/
+# dev-postgres.mjs for the zero-install alternative that needs no Docker)
+# — this is for anyone who prefers/already has Docker running, or for a
+# closer-to-production local smoke test of the full image (see the `web`
+# service, which is commented out by default; uncomment to test the built
+# Dockerfile locally).
+#
+# Usage: docker compose up -d postgres redis
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bingo
+      POSTGRES_PASSWORD: bingo_dev_password
+      POSTGRES_DB: bingo_dev
+    ports:
+      - "55432:5432"
+    volumes:
+      - bingo_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bingo -d bingo_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "57379:6379"
+    volumes:
+      - bingo_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Uncomment to run the production image itself against the two services
+  # above — a closer-to-real smoke test than `pnpm dev`. Needs a real
+  # .env.production file (see .env.example); never commit one.
+  # web:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   env_file:
+  #     - .env.production
+  #   environment:
+  #     DATABASE_URL: postgresql://bingo:bingo_dev_password@postgres:5432/bingo_dev
+  #     REDIS_URL: redis://redis:6379
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+volumes:
+  bingo_postgres_data:
+  bingo_redis_data:

@@ -1,0 +1,853 @@
+// ============================================================================
+// Bingo Platform — Prisma Schema (PHASE 1)
+// PostgreSQL. All monetary values use Decimal(18,2) — never Float.
+// All primary keys are UUIDs. Soft deletion via `deletedAt` where applicable.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// ENUMS
+// ----------------------------------------------------------------------------
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DELETED
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationTokenType {
+  EMAIL_VERIFICATION
+  PHONE_OTP
+  PASSWORD_RESET
+}
+
+enum WalletTxType {
+  DEPOSIT
+  WITHDRAWAL
+  TICKET_PURCHASE
+  WINNING_PAYOUT
+  REFUND
+  PROMO_CREDIT
+  ADJUSTMENT
+  PLATFORM_FEE
+  REVERSAL
+}
+
+enum WalletTxStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum PaymentProviderType {
+  TELEBIRR
+  CBE
+  CHAPA
+  ARIFPAY
+  MPESA
+  MOCK
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  // The provider gave an ambiguous answer (verification call timed out,
+  // network error, or a genuinely unknown status) rather than a definite
+  // outcome. NEVER auto-derived as "probably failed" — a human/reconciliation
+  // job must resolve it. Non-terminal: still eligible for reconciliation.
+  PENDING_RECONCILIATION
+  SUCCESS
+  FAILED
+  CANCELLED
+  EXPIRED
+  REVERSED
+}
+
+enum WithdrawalStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum GameStatus {
+  DRAFT
+  SCHEDULED
+  OPEN
+  FULL
+  STARTING
+  LIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum CallMode {
+  AUTO
+  MANUAL
+}
+
+enum PatternMatchType {
+  EXACT_MATCH // matrix-driven: four corners, X, plus, diagonals, full house, custom shapes
+  ANY_ROWS // any N distinct rows fully marked (horizontal line patterns)
+  ANY_COLUMNS // any N distinct columns fully marked (vertical line patterns)
+}
+
+enum TicketStatus {
+  ACTIVE
+  WINNER
+  VOID
+  REFUNDED
+}
+
+enum PlatformLedgerType {
+  PRIZE_POOL_CONTRIBUTION // ticket-purchase-time reservation of the winner-payout portion of a ticket's price
+  PLATFORM_FEE_REVENUE // ticket-purchase-time recognition of the platform's cut — permanent revenue, never reversed by a win
+  PRIZE_PAYOUT // debit at winner payout time, mirrors the WINNING_PAYOUT credit to the winner's wallet
+  PRIZE_POOL_FORFEITED // all 75 numbers called with no winner — reserved pool converts to platform revenue (documented policy)
+  REFUND // debit at ticket refund time (game cancelled pre-start), mirrors the REFUND credit to the player's wallet
+}
+
+enum PrizeRuleType {
+  FIXED
+  PERCENTAGE_OF_SALES
+  JACKPOT
+  MULTI_LEVEL
+}
+
+enum TieBreakRule {
+  SPLIT_EQUALLY
+  FIRST_TICKET_WINS
+  SHARE_BY_STAKE
+}
+
+enum AnnouncementTarget {
+  ALL
+  GAME
+  USER
+}
+
+enum AnnouncementType {
+  INFO
+  WARNING
+  IMPORTANT
+  WINNER
+  SYSTEM
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+}
+
+enum GameEventType {
+  CREATED
+  UPDATED
+  OPENED
+  REGISTRATION_CLOSED
+  TICKET_SOLD
+  STARTING
+  STARTED
+  NUMBER_CALLED
+  PAUSED
+  RESUMED
+  ANNOUNCEMENT
+  WINNER_DECLARED
+  COMPLETED
+  CANCELLED
+  PRIZE_DISTRIBUTED
+  SEED_REVEALED
+}
+
+// ----------------------------------------------------------------------------
+// IDENTITY & ACCESS
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(uuid())
+  fullName     String
+  username     String     @unique
+  email        String     @unique
+  phone        String     @unique // E.164 Ethiopian format, e.g. +2519XXXXXXXX
+  passwordHash String
+  status       UserStatus @default(PENDING_VERIFICATION)
+
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+  termsAcceptedAt DateTime?
+
+  referralCode String  @unique
+  referredById String?
+  referredBy   User?   @relation("Referrals", fields: [referredById], references: [id])
+  referrals    User[]  @relation("Referrals")
+
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String? // encrypted at rest, never plaintext
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  wallet                 Wallet?
+  roles                  UserRole[]
+  sessions               Session[]
+  loginAttempts          LoginAttempt[]          @relation("LoginAttemptUser")
+  devices                UserDevice[]
+  kyc                    KycRecord?
+  responsibleGamingLimit ResponsibleGamingLimit?
+  twoFactorRecoveryCodes TwoFactorRecoveryCode[]
+
+  tickets             BingoTicket[]
+  gamePlayers         GamePlayer[]
+  gamesCreated        Game[]              @relation("GameCreatedBy")
+  winners             Winner[]
+  payments            Payment[]
+  withdrawals         Withdrawal[]        @relation("WithdrawalUser")
+  withdrawalsReviewed Withdrawal[]        @relation("WithdrawalReviewer")
+  notifications       Notification[]
+  announcementsSent   Announcement[]      @relation("AnnouncementCreatedBy")
+  announcementsToMe   Announcement[]      @relation("AnnouncementTargetUser")
+  auditLogs           AuditLog[]          @relation("AuditLogActor")
+  verificationTokens  VerificationToken[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Responsible-gaming controls — self-imposed spending/deposit limits and
+// exclusion periods. Enforcement is server-side only (checked inside
+// purchaseTickets() and createDeposit(), never trusted from the client);
+// this row is the single source of truth those checks read from.
+// One row per user, created on first use (not on registration) so the
+// absence of a row simply means "no limits set" rather than needing a
+// separate defaulting migration for existing users.
+model ResponsibleGamingLimit {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  dailyDepositLimit  Decimal? @db.Decimal(18, 2)
+  weeklyDepositLimit Decimal? @db.Decimal(18, 2)
+  dailySpendLimit    Decimal? @db.Decimal(18, 2) // ticket purchases
+  weeklySpendLimit   Decimal? @db.Decimal(18, 2)
+
+  // Increasing a limit (or removing one) takes effect only after this
+  // cool-down instant — set 24h in the future whenever a limit is raised
+  // or cleared. Decreasing a limit always takes effect immediately.
+  // Prevents "raise my limit to keep playing" in the heat of the moment.
+  pendingIncreaseEffectiveAt DateTime?
+  pendingDailyDepositLimit   Decimal?  @db.Decimal(18, 2)
+  pendingWeeklyDepositLimit  Decimal?  @db.Decimal(18, 2)
+  pendingDailySpendLimit     Decimal?  @db.Decimal(18, 2)
+  pendingWeeklySpendLimit    Decimal?  @db.Decimal(18, 2)
+
+  // Cooling-off: short, self-service, cannot be cancelled early.
+  coolingOffUntil DateTime?
+
+  // Self-exclusion: longer, requires support to lift early (not exposed
+  // via any player-facing "cancel" action).
+  selfExcludedUntil DateTime?
+  selfExcludedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One-time-use TOTP recovery codes, generated once at enrollment and shown
+// to the user exactly once. Hashed the same way as passwords (argon2) —
+// never stored or logged in plaintext.
+model TwoFactorRecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Prevent multiple accounts exploiting one promotion/game from the same device.
+model UserDevice {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  fingerprintHash String // hashed device fingerprint, never raw
+  ipAddress       String
+  userAgent       String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @updatedAt
+
+  @@unique([userId, fingerprintHash])
+  @@index([fingerprintHash])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique // SUPER_ADMIN, ADMIN, GAME_OPERATOR, FINANCE, SUPPORT, PLAYER
+  description String?
+  isSystem    Boolean  @default(false) // system roles cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g. "game:create", "withdrawal:approve"
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// Refresh-token backed sessions (JWT access tokens are short-lived and stateless).
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ipAddress        String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Every login attempt (success or failure) — powers rate limiting & lockout.
+model LoginAttempt {
+  id         String   @id @default(uuid())
+  identifier String // email, username, or phone as submitted
+  userId     String?
+  user       User?    @relation("LoginAttemptUser", fields: [userId], references: [id])
+  success    Boolean
+  ipAddress  String
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, createdAt])
+  @@index([ipAddress, createdAt])
+}
+
+model KycRecord {
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  user             User      @relation(fields: [userId], references: [id])
+  status           KycStatus @default(NOT_STARTED)
+  provider         String? // name of connected identity-verification provider (future)
+  providerRef      String?
+  documentType     String?
+  submittedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  rejectionReason  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+// Single-use, time-limited tokens for email verification, phone OTP, and
+// password reset. The raw token is only ever shown to the user once (via
+// email/SMS) — only its hash is persisted, mirroring how refresh tokens
+// are stored, so a DB leak alone can't be used to reset accounts.
+model VerificationToken {
+  id         String                @id @default(uuid())
+  userId     String
+  user       User                  @relation(fields: [userId], references: [id])
+  type       VerificationTokenType
+  tokenHash  String                @unique
+  requestIp  String?
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime              @default(now())
+
+  @@index([userId, type])
+  @@index([expiresAt])
+}
+
+// ----------------------------------------------------------------------------
+// WALLET & LEDGER
+// ----------------------------------------------------------------------------
+
+model Wallet {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id])
+  availableBalance Decimal  @default(0) @db.Decimal(18, 2)
+  pendingBalance   Decimal  @default(0) @db.Decimal(18, 2)
+  currency         String   @default("ETB")
+  version          Int      @default(0) // optimistic locking to prevent race conditions
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  transactions WalletTransaction[]
+}
+
+// Immutable, append-only ledger. Rows are never mutated after COMPLETED/FAILED;
+// state corrections are made by inserting a new REVERSAL/ADJUSTMENT row.
+model WalletTransaction {
+  id            String         @id @default(uuid())
+  walletId      String
+  wallet        Wallet         @relation(fields: [walletId], references: [id])
+  userId        String
+  type          WalletTxType
+  status        WalletTxStatus @default(PENDING)
+  amount        Decimal        @db.Decimal(18, 2) // always positive; `type` conveys direction
+  currency      String         @default("ETB")
+  balanceBefore Decimal        @db.Decimal(18, 2)
+  balanceAfter  Decimal        @db.Decimal(18, 2)
+
+  provider              String? // e.g. TELEBIRR, CBE, MOCK, or null for internal
+  providerTransactionId String?
+  referenceId           String  @unique // idempotency key for this ledger entry
+
+  relatedPaymentId    String?
+  relatedPayment      Payment?     @relation(fields: [relatedPaymentId], references: [id])
+  relatedWithdrawalId String?
+  relatedWithdrawal   Withdrawal?  @relation(fields: [relatedWithdrawalId], references: [id])
+  relatedTicketId     String?
+  relatedTicket       BingoTicket? @relation(fields: [relatedTicketId], references: [id])
+  relatedGameId       String?
+  relatedGame         Game?        @relation(fields: [relatedGameId], references: [id])
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([walletId, createdAt])
+  @@index([userId, createdAt])
+  @@index([type])
+}
+
+// ----------------------------------------------------------------------------
+// PAYMENTS (Deposits) — provider-agnostic
+// ----------------------------------------------------------------------------
+
+model Payment {
+  id       String              @id @default(uuid())
+  userId   String
+  user     User                @relation(fields: [userId], references: [id])
+  provider PaymentProviderType
+  amount   Decimal             @db.Decimal(18, 2)
+  currency String              @default("ETB")
+  status   PaymentStatus       @default(INITIATED)
+
+  providerOrderId       String? // our order/merchant reference sent to provider
+  providerTransactionId String? // provider's transaction id (from callback)
+  idempotencyKey        String    @unique // dedupes duplicate create-order requests
+  callbackReceivedAt    DateTime?
+  callbackPayloadRaw    Json? // raw verified callback body, for reconciliation
+  verifiedAt            DateTime? // set only after server-side verification call
+  failureReason         String?
+  metadata              Json? // provider-specific extras (e.g. mock-simulation state), never secrets
+
+  walletTransactions WalletTransaction[]
+  callbackLogs       PaymentCallbackLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([provider, status])
+  @@index([providerOrderId])
+  @@index([providerTransactionId])
+}
+
+// One row per received webhook/callback DELIVERY — deliberately NOT deduped,
+// so 20 identical retried callbacks produce 20 forensic rows even though
+// exactly one of them is ever allowed to actually apply (`processedResult`
+// distinguishes "APPLIED" from "DUPLICATE_IGNORED" / rejections). This is
+// what makes payment problems investigable after the fact.
+model PaymentCallbackLog {
+  id              String              @id @default(uuid())
+  provider        PaymentProviderType
+  paymentId       String?
+  payment         Payment?            @relation(fields: [paymentId], references: [id])
+  providerTxnId   String?
+  providerEventId String? // provider's own notification/event id, when it sends one
+  signatureValid  Boolean
+  rawPayload      Json
+  processedResult String // APPLIED | DUPLICATE_IGNORED | REJECTED_BAD_SIGNATURE | REJECTED_UNKNOWN_PAYMENT | REJECTED_TAMPERED | REJECTED_VERIFICATION_FAILED | ERROR
+  errorMessage    String?
+  receivedAt      DateTime            @default(now())
+  processedAt     DateTime?
+
+  @@index([provider, providerTxnId])
+  @@index([paymentId])
+}
+
+// ----------------------------------------------------------------------------
+// WITHDRAWALS
+// ----------------------------------------------------------------------------
+
+model Withdrawal {
+  id                 String              @id @default(uuid())
+  userId             String
+  user               User                @relation("WithdrawalUser", fields: [userId], references: [id])
+  amount             Decimal             @db.Decimal(18, 2)
+  currency           String              @default("ETB")
+  provider           PaymentProviderType
+  destinationAccount String // masked in API responses
+  reference          String              @unique
+  status             WithdrawalStatus    @default(REQUESTED)
+
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("WithdrawalReviewer", fields: [reviewedByUserId], references: [id])
+  reviewedAt       DateTime?
+  reason           String?
+
+  walletTransactions WalletTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+// ----------------------------------------------------------------------------
+// BINGO GAME ENGINE
+// ----------------------------------------------------------------------------
+
+model WinningPattern {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  matchType   PatternMatchType @default(EXACT_MATCH)
+  matrix      Json? // 5x5 matrix of 0/1, e.g. [[1,0,0,0,1],...] — required for EXACT_MATCH
+  config      Json? // e.g. {"linesRequired": 2} for ANY_ROWS/ANY_COLUMNS
+  enabled     Boolean          @default(true)
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  games   Game[]
+  winners Winner[]
+}
+
+model PrizeRule {
+  id                 String        @id @default(uuid())
+  name               String        @unique
+  type               PrizeRuleType
+  config             Json // flexible: {"winnerPercent":50,"platformFeePercent":20,"reservePercent":30,"levels":[...]}
+  tieBreakRule       TieBreakRule  @default(SPLIT_EQUALLY)
+  platformFeePercent Decimal       @default(0) @db.Decimal(5, 2)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  games Game[]
+}
+
+model Game {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  status      GameStatus @default(DRAFT)
+
+  gameDate            DateTime
+  startTime           DateTime
+  registrationOpenAt  DateTime
+  registrationCloseAt DateTime
+
+  ticketPrice         Decimal @db.Decimal(18, 2)
+  maxPlayers          Int
+  maxTicketsPerPlayer Int     @default(5)
+  minPlayers          Int     @default(2)
+  jackpotAmount       Decimal @default(0) @db.Decimal(18, 2)
+
+  callIntervalSeconds Int      @default(5)
+  callMode            CallMode @default(AUTO)
+  // Purely a client-side marking affordance — winner detection always reads
+  // calledNumbers directly and never depends on what a player has "marked",
+  // whether auto or manual. See GameRoom.tsx's PlayerCard.
+  manualMarkEnabled   Boolean  @default(false)
+  // Atomic call-number counter — the sole concurrency guard for
+  // callNextNumber(): a conditional UPDATE ... WHERE calledCount = N lets
+  // exactly one concurrent caller win the race to call ball N+1, the same
+  // pattern used for Wallet.version and Payment status transitions.
+  calledCount         Int      @default(0)
+
+  winningPatternId String
+  winningPattern   WinningPattern @relation(fields: [winningPatternId], references: [id])
+  prizeRuleId      String
+  prizeRule        PrizeRule      @relation(fields: [prizeRuleId], references: [id])
+
+  // Provably-fair commitment scheme
+  seedCommitmentHash  String // SHA-256(secretSeed), published at game open
+  secretSeedEncrypted String? // encrypted secret seed; decrypted & revealed post-game
+  seedRevealedAt      DateTime?
+
+  createdByUserId String
+  createdBy       User   @relation("GameCreatedBy", fields: [createdByUserId], references: [id])
+
+  startedAt    DateTime?
+  pausedAt     DateTime?
+  completedAt  DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  players               GamePlayer[]
+  tickets               BingoTicket[]
+  calledNumbers         BingoNumber[]
+  winners               Winner[]
+  events                GameEvent[]
+  announcements         Announcement[]
+  walletTransactions    WalletTransaction[]
+  platformLedgerEntries PlatformLedgerEntry[]
+
+  @@index([status])
+  @@index([startTime])
+}
+
+model GamePlayer {
+  id          String   @id @default(uuid())
+  gameId      String
+  game        Game     @relation(fields: [gameId], references: [id])
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  ticketCount Int      @default(0)
+  joinedAt    DateTime @default(now())
+
+  @@unique([gameId, userId])
+  @@index([gameId])
+}
+
+model BingoTicket {
+  id                    String       @id @default(uuid())
+  gameId                String
+  game                  Game         @relation(fields: [gameId], references: [id])
+  userId                String
+  user                  User         @relation(fields: [userId], references: [id])
+  ticketNumber          Int // sequential per game, assigned atomically
+  cardNumbers           Json // {"B":[..5],"I":[..5],"N":[4 + FREE],"G":[..5],"O":[..5]}
+  status                TicketStatus @default(ACTIVE)
+  purchasePrice         Decimal      @db.Decimal(18, 2)
+  purchaseTransactionId String?
+  createdAt             DateTime     @default(now())
+
+  winner                Winner?
+  walletTransactions    WalletTransaction[]
+  platformLedgerEntries PlatformLedgerEntry[]
+
+  @@unique([gameId, ticketNumber])
+  @@index([gameId, userId])
+}
+
+model BingoNumber {
+  id             String   @id @default(uuid())
+  gameId         String
+  game           Game     @relation(fields: [gameId], references: [id])
+  ballNumber     Int // 1-75
+  letter         String // B, I, N, G, O
+  sequenceNumber Int // order called within the game, starting at 1
+  calledAt       DateTime @default(now())
+
+  @@unique([gameId, ballNumber])
+  @@unique([gameId, sequenceNumber])
+  @@index([gameId])
+}
+
+model Winner {
+  id                   String         @id @default(uuid())
+  gameId               String
+  game                 Game           @relation(fields: [gameId], references: [id])
+  ticketId             String         @unique
+  ticket               BingoTicket    @relation(fields: [ticketId], references: [id])
+  userId               String
+  user                 User           @relation(fields: [userId], references: [id])
+  winningPatternId     String
+  winningPattern       WinningPattern @relation(fields: [winningPatternId], references: [id])
+  ballNumberAtWin      Int
+  calledSequenceNumber Int // which call # (1-indexed) completed the pattern
+  winningPositions     Json // [{row,col,letter,number}] — the exact cells that satisfied the pattern
+  prizeAmount          Decimal        @db.Decimal(18, 2)
+  splitCount           Int            @default(1) // number of simultaneous winners sharing the prize
+  walletTransactionId  String?
+  confirmedAt          DateTime       @default(now())
+
+  @@index([gameId])
+}
+
+// ----------------------------------------------------------------------------
+// PLATFORM ACCOUNTING
+//
+// A ticket price is never simply "revenue" — it splits into a prize-pool
+// contribution (money the platform holds on behalf of future winners) and a
+// platform-fee contribution (the platform's own revenue), per the game's
+// PrizeRule. This is the counterparty side of that split: `PlatformAccount`
+// is a single-row ledger-backed account (like `Wallet`, but there's exactly
+// one, owned by the platform rather than a user) that custodies prize-pool
+// money between ticket purchase and either payout, forfeiture (no winner),
+// or refund (cancelled game). Every balance change is an immutable
+// `PlatformLedgerEntry` row, so Finance can reconcile every ETB: sum of
+// prize-pool contributions in, minus payouts/forfeitures/refunds out, must
+// equal the account balance at all times.
+// ----------------------------------------------------------------------------
+
+model PlatformAccount {
+  id               String   @id @default(uuid())
+  singleton        Int      @unique @default(1) // Prisma has no native "at most one row" constraint; a unique column pinned to 1 enforces it
+  availableBalance Decimal  @default(0) @db.Decimal(18, 2)
+  version          Int      @default(0) // optimistic locking, same pattern as Wallet.version
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  ledgerEntries PlatformLedgerEntry[]
+}
+
+model PlatformLedgerEntry {
+  id            String             @id @default(uuid())
+  accountId     String
+  account       PlatformAccount    @relation(fields: [accountId], references: [id])
+  type          PlatformLedgerType
+  amount        Decimal            @db.Decimal(18, 2) // always positive; `type` conveys direction
+  balanceBefore Decimal            @db.Decimal(18, 2)
+  balanceAfter  Decimal            @db.Decimal(18, 2)
+  referenceId   String             @unique // idempotency key
+
+  relatedGameId   String?
+  relatedGame     Game?        @relation(fields: [relatedGameId], references: [id])
+  relatedTicketId String?
+  relatedTicket   BingoTicket? @relation(fields: [relatedTicketId], references: [id])
+  relatedWinnerId String? // informational only — Winner rows are keyed by ticketId, already reachable via relatedTicketId
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([relatedGameId, createdAt])
+  @@index([type])
+}
+
+// ----------------------------------------------------------------------------
+// COMMUNICATION
+// ----------------------------------------------------------------------------
+
+model Announcement {
+  id              String             @id @default(uuid())
+  gameId          String?
+  game            Game?              @relation(fields: [gameId], references: [id])
+  targetUserId    String?
+  targetUser      User?              @relation("AnnouncementTargetUser", fields: [targetUserId], references: [id])
+  targetType      AnnouncementTarget
+  type            AnnouncementType
+  message         String
+  active          Boolean            @default(true)
+  expiresAt       DateTime?
+  createdByUserId String
+  createdBy       User               @relation("AnnouncementCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime           @default(now())
+
+  @@index([gameId])
+  @@index([createdAt])
+  @@index([targetType, active])
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id])
+  type      String // e.g. "DEPOSIT_SUCCESS", "GAME_STARTING", "WINNER"
+  title     String
+  body      String
+  channel   NotificationChannel @default(IN_APP)
+  read      Boolean             @default(false)
+  readAt    DateTime?
+  metadata  Json?
+  createdAt DateTime            @default(now())
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+// ----------------------------------------------------------------------------
+// AUDIT, GAME EVENTS, SETTINGS
+// ----------------------------------------------------------------------------
+
+// Generic, platform-wide audit trail for sensitive actions (admin + system).
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  actor       User?    @relation("AuditLogActor", fields: [actorUserId], references: [id])
+  action      String // e.g. "START_GAME", "APPROVE_WITHDRAWAL", "SUSPEND_USER"
+  entityType  String // e.g. "Game", "User", "Withdrawal"
+  entityId    String
+  oldValue    Json?
+  newValue    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+  @@index([action])
+}
+
+// High-frequency, append-only game timeline — powers the provably-fair audit trail
+// and the operator's live event log. Kept separate from AuditLog for query performance.
+model GameEvent {
+  id        String        @id @default(uuid())
+  gameId    String
+  game      Game          @relation(fields: [gameId], references: [id])
+  type      GameEventType
+  payload   Json?
+  createdAt DateTime      @default(now())
+
+  @@index([gameId, createdAt])
+}
+
+model SystemSetting {
+  id              String   @id @default(uuid())
+  key             String   @unique
+  value           Json
+  description     String?
+  updatedByUserId String?
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+}

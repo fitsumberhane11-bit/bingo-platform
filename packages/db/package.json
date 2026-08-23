@@ -1,0 +1,34 @@
+{
+  "name": "@bingo/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "validate": "prisma validate",
+    "format": "prisma format",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
+    "studio": "prisma studio",
+    "seed": "tsx src/seed.ts",
+    "integrity-check": "tsx scripts/integrity-check.ts",
+    "dev:postgres": "node scripts/dev-postgres.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@bingo/game-core": "workspace:*",
+    "@bingo/shared-types": "workspace:*",
+    "@node-rs/argon2": "2.1.0",
+    "@prisma/client": "5.19.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.16.10",
+    "embedded-postgres": "18.4.0-beta.17",
+    "prisma": "5.19.1",
+    "tsx": "4.19.0",
+    "typescript": "5.5.4"
+  }
+}

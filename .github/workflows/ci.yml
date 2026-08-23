@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same branch/PR — no point finishing a CI
+# run for a commit that's already been replaced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://bingo:bingo_ci_password@localhost:55432/bingo_ci
+  REDIS_URL: redis://localhost:57379
+  NODE_ENV: development
+  APP_URL: http://localhost:3000
+  APP_NAME: Ethiopia Bingo
+  # CI-only secrets — never used outside this workflow, deliberately not
+  # reused from repo secrets so a leak here can't compromise anything real.
+  AUTH_JWT_ACCESS_SECRET: ci-only-access-secret-do-not-reuse-anywhere-else-000
+  AUTH_JWT_REFRESH_SECRET: ci-only-refresh-secret-do-not-reuse-anywhere-else-0
+  APP_ENCRYPTION_KEY: ci-only-encryption-key-do-not-reuse-anywhere-else-00000
+  ENABLE_MOCK_PAYMENTS: "true"
+  PAYMENTS_LIVE_MODE: "false"
+  SMS_PROVIDER: mock
+  GAME_MONEY_MODE: TEST
+
+jobs:
+  # Fails the whole run fast if a secret-shaped string is committed —
+  # cheaper than waiting for the rest of the pipeline to fail too.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bingo
+          POSTGRES_PASSWORD: bingo_ci_password
+          POSTGRES_DB: bingo_ci
+        ports:
+          - "55432:5432"
+        options: >-
+          --health-cmd "pg_isready -U bingo -d bingo_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "57379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Apply database migrations
+        run: pnpm db:migrate:deploy
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Unit + integration tests
+        run: pnpm test
+
+      - name: Database integrity check
+        run: pnpm db:integrity-check
+
+      - name: Production build (also enforces the real-money env gate)
+        run: pnpm build
+        env:
+          NODE_ENV: production
+          ENABLE_MOCK_PAYMENTS: "false"
+          GAME_MONEY_MODE: REAL
+          APP_URL: https://ci-build-placeholder.invalid
