@@ -1,21 +1,26 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ShieldCheck, Smartphone, Trophy, Zap } from "lucide-react";
+import { getCurrentUser } from "@/lib/current-user";
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const current = await getCurrentUser();
+  if (current) redirect("/dashboard");
+
   return (
     <div>
       <section className="relative overflow-hidden bg-gradient-to-b from-brand-950 via-ink-900 to-ink-900 text-white">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 sm:py-24 lg:grid-cols-2 lg:items-center">
           <div>
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-brand-200">
-              <Zap className="h-3.5 w-3.5" /> Live multiplayer Bingo
+              <Zap className="h-3.5 w-3.5" /> Live multiplayer Bingo — Demo
             </span>
             <h1 className="mt-4 text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl">
-              Play Bingo live with thousands of players across Ethiopia
+              Play Bingo live with players across Ethiopia
             </h1>
             <p className="mt-4 max-w-xl text-lg text-slate-300">
-              Buy your card, watch numbers called in real time, and win real prizes — pay securely with
-              Telebirr or CBE.
+              Buy your card with DEMO balance, watch numbers called in real time, and win DEMO prizes.
+              This is a test version — no real money is involved.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href="/register" className="btn-primary px-6 py-3 text-base">
@@ -67,8 +72,8 @@ export default function LandingPage() {
           />
           <Feature
             icon={<Smartphone className="h-5 w-5" />}
-            title="Telebirr & CBE"
-            body="Deposit and withdraw using the payment methods Ethiopians already trust."
+            title="Built for mobile"
+            body="Play comfortably on any phone — designed for the way Ethiopians actually browse the web."
           />
         </div>
       </section>

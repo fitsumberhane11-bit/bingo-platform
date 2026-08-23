@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { prisma } from "@bingo/db";
 import { getCurrentUser } from "@/lib/current-user";
 import { EditProfileForm } from "./EditProfileForm";
@@ -8,8 +9,9 @@ export const metadata = { title: "Profile" };
 
 export default async function ProfilePage() {
   const current = await getCurrentUser();
+  if (!current) redirect("/login");
   const user = await prisma.user.findUniqueOrThrow({
-    where: { id: current!.sub },
+    where: { id: current.sub },
     select: {
       fullName: true,
       username: true,

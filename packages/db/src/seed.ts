@@ -78,11 +78,25 @@ async function seedDevUser(input: {
   passwordHash: string;
   walletBalance?: number;
 }) {
+  // Deliberately NOT prisma.user.upsert(): an upsert's `update: {}` branch
+  // still returns the *existing* row, and code below that assumes "this
+  // wallet was just created with balance 0" would then write a fabricated
+  // opening-balance WalletTransaction (balanceBefore: 0) against a wallet
+  // that may have real, unrelated transaction history already — a false
+  // ledger entry that breaks reconciliation for that user without ever
+  // touching the actual balance (so it's easy to miss). Found live: running
+  // this seed against a username that already existed with real activity
+  // (from manual testing) fabricated exactly that phantom DEPOSIT row.
+  // Checking existence first and skipping entirely for existing users is
+  // the only way to make the opening-balance transaction genuinely
+  // conditional on genuine first creation, not just on referenceId
+  // uniqueness (which the fabricated row would have satisfied fine).
+  const existingUser = await prisma.user.findUnique({ where: { username: input.username }, include: { wallet: true } });
+  if (existingUser) return existingUser;
+
   const referralCode = input.username.toUpperCase().slice(0, 8) + "0001";
-  const user = await prisma.user.upsert({
-    where: { username: input.username },
-    update: {},
-    create: {
+  const user = await prisma.user.create({
+    data: {
       fullName: input.fullName,
       username: input.username,
       email: input.email,
@@ -104,6 +118,7 @@ async function seedDevUser(input: {
   // is real money sitting in the wallet with no ledger entry to explain it,
   // which breaks platform-wide financial reconciliation (see docs/STATUS.md
   // Phase 9: this exact gap was caught live by the reconciliation dashboard).
+  // Safe to assume a fresh wallet here — the existing-user case returned above.
   if (input.walletBalance && input.walletBalance > 0 && user.wallet) {
     const referenceId = `seed-opening-balance:${user.id}`;
     const existing = await prisma.walletTransaction.findUnique({ where: { referenceId } });
@@ -291,9 +306,36 @@ async function main() {
     passwordHash,
     walletBalance: 250,
   });
+  await seedDevUser({
+    fullName: "Test Player Three",
+    username: "player3",
+    email: "player3@dev.local",
+    phone: "+251911000008",
+    roleId: roles[ROLES.PLAYER]!.id,
+    passwordHash,
+    walletBalance: 500,
+  });
+  await seedDevUser({
+    fullName: "Test Player Four",
+    username: "player4",
+    email: "player4@dev.local",
+    phone: "+251911000009",
+    roleId: roles[ROLES.PLAYER]!.id,
+    passwordHash,
+    walletBalance: 500,
+  });
+  await seedDevUser({
+    fullName: "Test Player Five",
+    username: "player5",
+    email: "player5@dev.local",
+    phone: "+251911000010",
+    roleId: roles[ROLES.PLAYER]!.id,
+    passwordHash,
+    walletBalance: 500,
+  });
 
   console.log("\nDEVELOPMENT ONLY credentials (do not use in production):");
-  console.log("  superadmin / admin / operator / finance / support / player1 / player2");
+  console.log("  superadmin / admin / operator / finance / support / player1 / player2 / player3 / player4 / player5");
   console.log("  password for all: %s", DEV_PASSWORD);
   console.log("\nSeed complete.");
 }

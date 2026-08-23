@@ -316,6 +316,7 @@ export function GameRoom({
           {tickets.length === 0 ? (
             <BuyTicketPanel
               canBuy={canBuy}
+              status={status}
               isAuthenticated={isAuthenticated}
               ticketPrice={initialSnapshot.game.ticketPrice}
               maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer}
@@ -355,6 +356,7 @@ export function GameRoom({
               {canBuy && tickets.length < initialSnapshot.game.maxTicketsPerPlayer && (
                 <BuyTicketPanel
                   canBuy={canBuy}
+                  status={status}
                   isAuthenticated={isAuthenticated}
                   ticketPrice={initialSnapshot.game.ticketPrice}
                   maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer - tickets.length}
@@ -590,8 +592,20 @@ function PlayerCard({ card, calledSet, won, manualMark }: { card: Card; calledSe
   );
 }
 
+const NOT_YET_OPEN_STATUSES = new Set(["DRAFT", "SCHEDULED"]);
+const ALREADY_STARTED_STATUSES = new Set(["STARTING", "LIVE", "PAUSED"]);
+
+function ticketSalesMessage(status: string): string {
+  if (NOT_YET_OPEN_STATUSES.has(status)) return "Ticket sales haven't opened for this game yet — check back soon.";
+  if (ALREADY_STARTED_STATUSES.has(status)) return "This game has already started, so ticket sales are closed.";
+  if (status === "CANCELLED") return "This game was cancelled.";
+  if (status === "COMPLETED") return "This game has ended.";
+  return "Ticket sales are closed for this game.";
+}
+
 function BuyTicketPanel({
   canBuy,
+  status,
   isAuthenticated,
   ticketPrice,
   maxTicketsPerPlayer,
@@ -603,6 +617,7 @@ function BuyTicketPanel({
   compact,
 }: {
   canBuy: boolean;
+  status: string;
   isAuthenticated: boolean;
   ticketPrice: string;
   maxTicketsPerPlayer: number;
@@ -624,7 +639,7 @@ function BuyTicketPanel({
     );
   }
   if (!canBuy) {
-    return <p className={compact ? "mt-3 text-xs text-slate-400" : "py-6 text-center text-sm text-slate-400"}>Ticket sales are closed for this game.</p>;
+    return <p className={compact ? "mt-3 text-xs text-slate-400" : "py-6 text-center text-sm text-slate-400"}>{ticketSalesMessage(status)}</p>;
   }
   return (
     <div className={compact ? "mt-4 border-t border-slate-100 pt-4" : ""}>

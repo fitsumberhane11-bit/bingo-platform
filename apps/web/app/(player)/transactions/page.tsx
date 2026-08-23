@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma, type Prisma, type WalletTxType, type WalletTxStatus } from "@bingo/db";
 import { Receipt, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { getCurrentUser } from "@/lib/current-user";
@@ -16,10 +17,11 @@ export default async function TransactionsPage({
   searchParams: { type?: string; status?: string; page?: string };
 }) {
   const current = await getCurrentUser();
+  if (!current) redirect("/login");
   const page = Math.max(1, Number(searchParams.page ?? "1"));
 
   const where: Prisma.WalletTransactionWhereInput = {
-    userId: current!.sub,
+    userId: current.sub,
     ...(searchParams.type ? { type: searchParams.type as WalletTxType } : {}),
     ...(searchParams.status ? { status: searchParams.status as WalletTxStatus } : {}),
   };

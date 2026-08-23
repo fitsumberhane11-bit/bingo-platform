@@ -81,10 +81,16 @@ genuinely blocked on external parties/business decisions, not engineering.
 ## Accounts & access
 
 - [ ] Development seed accounts (`superadmin`/`admin`/`operator`/`finance`/
-      `support`/`player1`/`player2`, all sharing `DevPass123!`) are **never**
+      `support`/`player1`–`player5`, all sharing `DevPass123!`) are **never**
       seeded against the production database. The seed script
       (`packages/db/src/seed.ts`) is a dev-only tool — production admin
       accounts must be created deliberately with strong, unique passwords.
+- [x] Session refresh: fixed a real gap found live during the 2026-08-23
+      polish pass — the access-token cookie's 15-minute TTL had no working
+      refresh path (`/api/auth/refresh` existed but nothing ever called
+      it), so every session hard-expired on a fixed clock regardless of
+      activity. `components/layout/SessionKeepAlive.tsx` now pings it
+      every 8 minutes from both the player and admin shells. Verified live.
 - [x] TOTP 2FA implemented and verified live (enroll/QR/confirm, login
       challenge, recovery codes) — see `lib/two-factor-service.ts`. Currently
       **optional/self-service for any account**, not yet *enforced* for
@@ -126,9 +132,12 @@ genuinely blocked on external parties/business decisions, not engineering.
       `packages/db/src/integrity.ts`): per-wallet balance reconstruction,
       platform-wide money conservation, winner payout completeness,
       orphaned-ledger-entry detection, referenceId uniqueness. Wired into
-      CI. Proven live to catch real bugs — found and fixed a ~5,639 ETB
-      test-cleanup drift bug this project; 3 consecutive full test-suite
-      runs on a fresh database now show zero drift every time.
+      CI. Proven live to catch real bugs twice now — found and fixed a
+      ~5,639 ETB test-cleanup drift bug earlier in this project, and (on
+      2026-08-23) a dev-seed-script bug that fabricated a false ledger
+      entry against a pre-existing demo account (see
+      `feedback_bingo_test_data_hygiene.md`). Multiple consecutive full
+      test-suite runs on the current database show zero drift each time.
 - [x] Confirmed: every wallet balance change goes through
       `applyWalletTransaction` or the equivalent SERIALIZABLE-transaction
       pattern in `tickets.ts`/`payout.ts` — no stray `wallet.update` touching

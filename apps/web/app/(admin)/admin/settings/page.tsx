@@ -1,4 +1,5 @@
 import { PERMISSIONS } from "@bingo/shared-types";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { listSettings } from "@/lib/settings-service";
@@ -9,7 +10,8 @@ export const metadata = { title: "Settings" };
 
 export default async function AdminSettingsPage() {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.SETTINGS_MANAGE)) {
     return (

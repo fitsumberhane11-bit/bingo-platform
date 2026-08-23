@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { prisma } from "@bingo/db";
 import { PERMISSIONS } from "@bingo/shared-types";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { Alert } from "@/components/ui/Alert";
@@ -10,7 +11,8 @@ export const metadata = { title: "Games" };
 
 export default async function AdminGamesPage() {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.GAME_VIEW)) {
     return <Alert variant="error">You don&apos;t have permission to view games.</Alert>;

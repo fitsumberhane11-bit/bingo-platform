@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 import { prisma } from "@bingo/db";
 import { PERMISSIONS } from "@bingo/shared-types";
@@ -12,7 +12,8 @@ export const metadata = { title: "User Detail" };
 
 export default async function AdminUserDetailPage({ params }: { params: { id: string } }) {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.USER_VIEW)) {
     return <Alert variant="error">You don&apos;t have permission to view users.</Alert>;

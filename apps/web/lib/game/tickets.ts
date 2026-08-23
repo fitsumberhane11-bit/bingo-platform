@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, prisma } from "@bingo/db";
-import { generateBingoCard, validateBingoCard } from "@bingo/game-core";
+import { generateBingoCard, validateBingoCard, calculatePrizePool } from "@bingo/game-core";
 import { ConflictError, MaintenanceModeError, ValidationError } from "../errors";
 import { withSerializableRetry } from "./serializable-retry";
 import { getGameBroadcaster } from "./broadcaster";
@@ -196,12 +196,22 @@ export async function purchaseTickets(input: { gameId: string; userId: string; t
       },
     });
 
-    return { tickets, wallet: { availableBalance: balanceAfter.toString() }, player: updatedPlayer, newPlayerCount, game };
+    return { tickets, wallet: { availableBalance: balanceAfter.toString() }, player: updatedPlayer, newPlayerCount, game, prizeRule };
   }).then(async (result) => {
     const broadcaster = getGameBroadcaster();
+    // Recomputed post-commit (not derived from this purchase's own
+    // contribution) so it reflects the true running total even under
+    // concurrent purchases — same source of truth getGameSnapshot() uses.
+    const salesAgg = await prisma.bingoTicket.aggregate({ where: { gameId: result.game.id }, _sum: { purchasePrice: true } });
+    const prizePool = calculatePrizePool(
+      result.prizeRule.config as { type: typeof result.prizeRule.type; winnerPercent?: number; fixedAmount?: number },
+      salesAgg._sum.purchasePrice ?? new Prisma.Decimal(0),
+      result.game.jackpotAmount,
+    );
     broadcaster.publish(result.game.id, "game:ticket-purchased", {
       userId: input.userId,
       ticketCount: input.ticketCount,
+      prizePool: prizePool.toString(),
     });
     if (result.newPlayerCount !== undefined) {
       broadcaster.publish(result.game.id, "game:player-count", { count: result.newPlayerCount, maxPlayers: result.game.maxPlayers });

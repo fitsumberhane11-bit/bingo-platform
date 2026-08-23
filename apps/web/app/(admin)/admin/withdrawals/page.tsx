@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { prisma, type Prisma, type WithdrawalStatus, type PaymentProviderType } from "@bingo/db";
 import { PERMISSIONS } from "@bingo/shared-types";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { getWithdrawalAdminSummary, maskDestination } from "@/lib/withdrawal-service";
@@ -18,7 +19,8 @@ export default async function AdminWithdrawalsPage({
   searchParams: { status?: string; provider?: string; minAmount?: string; maxAmount?: string; page?: string };
 }) {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.WITHDRAWAL_VIEW)) {
     return (

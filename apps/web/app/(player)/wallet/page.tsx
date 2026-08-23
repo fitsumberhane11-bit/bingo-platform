@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma } from "@bingo/db";
 import { ArrowDownToLine, ArrowUpFromLine, Receipt, Wallet as WalletIcon } from "lucide-react";
 import { getCurrentUser } from "@/lib/current-user";
@@ -10,7 +11,8 @@ const SUM_TYPES = ["DEPOSIT", "WITHDRAWAL", "WINNING_PAYOUT", "TICKET_PURCHASE"]
 
 export default async function WalletPage() {
   const current = await getCurrentUser();
-  const userId = current!.sub;
+  if (!current) redirect("/login");
+  const userId = current.sub;
 
   const [wallet, sums, recent] = await Promise.all([
     prisma.wallet.findUnique({ where: { userId }, select: { availableBalance: true, pendingBalance: true, currency: true } }),

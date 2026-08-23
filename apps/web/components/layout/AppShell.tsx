@@ -4,6 +4,7 @@ import { LogoutButton } from "./LogoutButton";
 import { SidebarNav, BottomNav } from "./SidebarNav";
 import { TestMoneyBanner } from "./TestMoneyBanner";
 import { MaintenanceBanner } from "./MaintenanceBanner";
+import { SessionKeepAlive } from "./SessionKeepAlive";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -14,6 +15,7 @@ interface AppShellProps {
 export async function AppShell({ children, user, walletBalance }: AppShellProps) {
   return (
     <div className="min-h-screen bg-slate-50">
+      <SessionKeepAlive />
       <TestMoneyBanner />
       <MaintenanceBanner />
       <div className="lg:flex">

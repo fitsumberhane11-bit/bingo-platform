@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { History } from "lucide-react";
 import { getCurrentUser } from "@/lib/current-user";
 import { getPlayerGameHistory } from "@/lib/game/queries";
@@ -16,12 +17,13 @@ interface SearchParams {
 
 export default async function GameHistoryPage({ searchParams }: { searchParams: SearchParams }) {
   const current = await getCurrentUser();
+  if (!current) redirect("/login");
   const page = Math.max(1, Number(searchParams.page ?? "1"));
   const status = searchParams.status === "COMPLETED" || searchParams.status === "CANCELLED" ? searchParams.status : undefined;
   const wonOnly = searchParams.wonOnly === "true";
 
   const [{ games, total }, patterns] = await Promise.all([
-    getPlayerGameHistory(current!.sub, page, 10, {
+    getPlayerGameHistory(current.sub, page, 10, {
       status,
       search: searchParams.search?.trim() || undefined,
       winningPatternId: searchParams.winningPatternId || undefined,

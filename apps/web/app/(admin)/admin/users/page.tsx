@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { prisma, type Prisma } from "@bingo/db";
 import { PERMISSIONS } from "@bingo/shared-types";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { Alert } from "@/components/ui/Alert";
@@ -13,7 +14,8 @@ const PAGE_SIZE = 20;
 
 export default async function AdminUsersPage({ searchParams }: { searchParams: { q?: string; page?: string } }) {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.USER_VIEW)) {
     return <Alert variant="error">You don&apos;t have permission to view users.</Alert>;

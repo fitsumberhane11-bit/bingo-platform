@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Wallet, Trophy, Gamepad2, Bell, Ticket, Radio, CalendarClock, Megaphone } from "lucide-react";
 import { prisma } from "@bingo/db";
 import { getCurrentUser } from "@/lib/current-user";
@@ -10,7 +11,8 @@ const LOBBY_UPCOMING_STATUSES = ["SCHEDULED", "OPEN", "FULL", "STARTING"] as con
 
 export default async function DashboardPage() {
   const current = await getCurrentUser();
-  const userId = current!.sub;
+  if (!current) redirect("/login");
+  const userId = current.sub;
 
   const [user, recentNotifications, recentTransactions, liveGamesCount, upcomingGames, myTicketsCount, winningsAgg, recentGames, announcements] =
     await Promise.all([

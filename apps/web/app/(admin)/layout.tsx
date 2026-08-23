@@ -5,6 +5,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { AdminNav } from "@/components/layout/AdminNav";
 import { TestMoneyBanner } from "@/components/layout/TestMoneyBanner";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
+import { SessionKeepAlive } from "@/components/layout/SessionKeepAlive";
 
 /**
  * Admin shell — games, payments, withdrawals, finance, and user management.
@@ -20,6 +21,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <SessionKeepAlive />
       <TestMoneyBanner />
       <MaintenanceBanner />
       <header className="relative border-b border-slate-200 bg-ink-900 text-white">

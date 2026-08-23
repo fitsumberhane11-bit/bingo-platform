@@ -1,5 +1,6 @@
 import { PERMISSIONS } from "@bingo/shared-types";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { getFinancialOverview } from "@/lib/reports/financial-reconciliation";
@@ -9,7 +10,8 @@ export const metadata = { title: "Financial Overview" };
 
 export default async function AdminFinancePage() {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.REPORTS_VIEW)) {
     return (

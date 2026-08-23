@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Users, UserCheck, Radio, Ticket, TrendingUp, Award, Landmark } from "lucide-react";
 import { PERMISSIONS } from "@bingo/shared-types";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { getAdminDashboardStats } from "@/lib/reports/admin-dashboard";
@@ -11,7 +12,8 @@ export const metadata = { title: "Admin Dashboard" };
 
 export default async function AdminHomePage() {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
   const canViewReports = hasPermission(ctx, PERMISSIONS.REPORTS_VIEW);
 
   return (

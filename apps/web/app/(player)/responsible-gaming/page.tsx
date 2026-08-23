@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { getEffectiveLimits } from "@/lib/responsible-gaming-service";
 import { ResponsibleGamingPanel } from "./ResponsibleGamingPanel";
@@ -6,7 +7,8 @@ export const metadata = { title: "Responsible Gaming" };
 
 export default async function ResponsibleGamingPage() {
   const current = await getCurrentUser();
-  const limits = await getEffectiveLimits(current!.sub);
+  if (!current) redirect("/login");
+  const limits = await getEffectiveLimits(current.sub);
 
   return (
     <div className="max-w-2xl space-y-6">

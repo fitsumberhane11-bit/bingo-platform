@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, Trophy, Clock, Hash, Percent } from "lucide-react";
+import { Users, Trophy, Clock, Percent } from "lucide-react";
 import { listLobbyGames, listRecentCompletedGames } from "@/lib/game/queries";
 import { formatETB, formatEthiopianDateTime, formatEthiopianDate } from "@/lib/format";
 
@@ -98,6 +98,7 @@ interface LobbyGame {
 
 function GameCard({ game: g }: { game: LobbyGame }) {
   const isLive = g.status === "LIVE" || g.status === "STARTING";
+  const canBuyNow = g.status === "OPEN" || g.status === "FULL";
   return (
     <div className="card flex flex-col">
       <div className="mb-2 flex items-center justify-between">
@@ -114,10 +115,7 @@ function GameCard({ game: g }: { game: LobbyGame }) {
         </span>
       </div>
 
-      <h3 className="mb-1 font-semibold text-ink-900">{g.name}</h3>
-      <p className="mb-3 flex items-center gap-1 text-[11px] text-slate-300">
-        <Hash className="h-3 w-3" /> {g.id.slice(0, 8)}
-      </p>
+      <h3 className="mb-2 font-semibold text-ink-900">{g.name}</h3>
 
       <dl className="mb-4 grid grid-cols-2 gap-x-2 gap-y-2 text-sm">
         <div>
@@ -149,8 +147,8 @@ function GameCard({ game: g }: { game: LobbyGame }) {
         )}
       </dl>
 
-      <Link href={`/room/${g.id}`} className="btn-primary mt-auto">
-        {isLive ? "Join Game" : "Buy Ticket"}
+      <Link href={`/room/${g.id}`} className={canBuyNow || isLive ? "btn-primary mt-auto" : "btn-secondary mt-auto"}>
+        {isLive ? "Join Game" : canBuyNow ? "Buy Ticket" : "View Game"}
       </Link>
     </div>
   );

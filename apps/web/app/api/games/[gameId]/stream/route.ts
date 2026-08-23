@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/current-user";
 import { getGameBroadcaster, type GameEvent } from "@/lib/game/broadcaster";
 import { getGameSnapshot } from "@/lib/game/snapshot";
-import { ensureAutoCallerRunning } from "@/lib/game/engine";
+import { ensureAutoCallerRunning, ensureCountdownRunning } from "@/lib/game/engine";
 
 export const runtime = "nodejs";
 
@@ -34,10 +34,12 @@ export async function GET(req: NextRequest, { params }: { params: { gameId: stri
   const snapshot = await getGameSnapshot(params.gameId, current.sub);
   if (!snapshot) return new Response("Not found", { status: 404 });
 
-  // Self-heals a lost AUTO-mode calling timer after a realtime-process
-  // restart — see ensureAutoCallerRunning's doc comment. A no-op if the
-  // timer is already running, so this is safe to call on every connect.
+  // Self-heals a lost AUTO-mode calling timer, or a lost STARTING->LIVE
+  // countdown, after a realtime-process restart — see each function's doc
+  // comment. Both are no-ops if their timer is already running, so this is
+  // safe to call on every connect.
   ensureAutoCallerRunning(params.gameId, snapshot.game.status, snapshot.game.callMode);
+  ensureCountdownRunning(params.gameId, snapshot.game.status);
 
   const encoder = new TextEncoder();
   const broadcaster = getGameBroadcaster();

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { PERMISSIONS } from "@bingo/shared-types";
 import { CheckCircle2, AlertTriangle, ArrowLeft } from "lucide-react";
 import { getCurrentUser } from "@/lib/current-user";
@@ -12,7 +12,8 @@ export const metadata = { title: "Game Financial Summary" };
 
 export default async function GameFinancePage({ params }: { params: { gameId: string } }) {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.REPORTS_VIEW)) {
     return (

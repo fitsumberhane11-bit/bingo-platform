@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { prisma } from "@bingo/db";
 import { getCurrentUser } from "@/lib/current-user";
 import { Bell } from "lucide-react";
@@ -6,8 +7,9 @@ export const metadata = { title: "Notifications" };
 
 export default async function NotificationsPage() {
   const current = await getCurrentUser();
+  if (!current) redirect("/login");
   const notifications = await prisma.notification.findMany({
-    where: { userId: current!.sub },
+    where: { userId: current.sub },
     orderBy: { createdAt: "desc" },
     take: 50,
   });

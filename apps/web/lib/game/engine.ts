@@ -267,6 +267,25 @@ export function ensureAutoCallerRunning(gameId: string, status: string, callMode
   startAutoCaller(gameId);
 }
 
+/**
+ * Same self-healing idea as ensureAutoCallerRunning, for the other timer
+ * that only lives in process memory: the STARTING -> LIVE countdown. There
+ * is no persisted "countdown began at" timestamp to resume from (schema
+ * has startedAt for LIVE, pausedAt for PAUSED, but nothing for STARTING),
+ * so a genuinely orphaned STARTING game — the process that called
+ * startGame() exited before its countdown fired, e.g. a server restart —
+ * gets a fresh full countdown on the next connect rather than being stuck
+ * in STARTING forever with no path to LIVE. Restarting the countdown from
+ * the top costs a few extra seconds at most; getting permanently stuck
+ * costs the whole game.
+ */
+export function ensureCountdownRunning(gameId: string, status: string): void {
+  if (status !== "STARTING") return;
+  if (countdownTimers.has(gameId)) return;
+  getGameBroadcaster().publish(gameId, "game:countdown", { seconds: STARTING_COUNTDOWN_SECONDS });
+  scheduleCountdownToLive(gameId);
+}
+
 export async function pauseGame(gameId: string, actorId: string): Promise<Game> {
   stopAutoCaller(gameId);
   return transitionGame(gameId, actorId, "PAUSED");

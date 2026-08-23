@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { Alert } from "@/components/ui/Alert";
 import { ReconcileButton } from "../ReconcileButton";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 export const metadata = { title: "Payment detail" };
 
@@ -14,7 +14,8 @@ const NON_TERMINAL = new Set(["INITIATED", "PENDING", "PENDING_RECONCILIATION"])
 
 export default async function AdminPaymentDetailPage({ params }: { params: { paymentId: string } }) {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.PAYMENT_VIEW)) {
     return <Alert variant="error">You don&apos;t have permission to view payments.</Alert>;

@@ -2,14 +2,13 @@
   "name": "bingo-platform",
   "private": true,
   "version": "0.1.0",
-  "description": "Production-grade real-money multiplayer Bingo platform for Ethiopia (Telebirr / CBE).",
+  "description": "Multiplayer Bingo platform for Ethiopia — currently in DEMO mode (test money only); Telebirr/CBE integration is a future phase.",
   "engines": {
     "node": ">=20"
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "pnpm --filter web dev",
-    "dev:realtime": "pnpm --filter realtime dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

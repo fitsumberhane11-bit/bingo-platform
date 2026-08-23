@@ -1,5 +1,6 @@
 import { prisma } from "@bingo/db";
 import { PERMISSIONS } from "@bingo/shared-types";
+import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { Alert } from "@/components/ui/Alert";
@@ -9,7 +10,8 @@ export const metadata = { title: "Create Game" };
 
 export default async function NewGamePage() {
   const current = await getCurrentUser();
-  const ctx = await loadAccessContext(current!.sub);
+  if (!current) redirect("/login");
+  const ctx = await loadAccessContext(current.sub);
 
   if (!hasPermission(ctx, PERMISSIONS.GAME_CREATE)) {
     return <Alert variant="error">You don&apos;t have permission to create games.</Alert>;
