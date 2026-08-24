@@ -101,7 +101,7 @@ export function WithdrawForm() {
   return (
     <div className="space-y-6">
       <Alert variant="info">
-        <span className="font-semibold">TEST GAME — NO REAL MONEY.</span> Withdrawals are reviewed by Finance and
+        <span className="font-semibold">DEMO MODE — NO REAL MONEY.</span> Withdrawals are reviewed by Finance and
         simulated end-to-end (Telebirr and CBE are not yet connected to a live payment network). No real funds ever
         leave the platform in this mode.
       </Alert>

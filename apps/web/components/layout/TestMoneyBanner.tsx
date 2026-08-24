@@ -16,7 +16,7 @@ export function TestMoneyBanner() {
 
   return (
     <div className="bg-amber-400 px-4 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-amber-950">
-      Test Game — No Real Money
+      Demo Mode — No Real Money
     </div>
   );
 }

@@ -15,6 +15,15 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "1mb",
     },
+    // Game/lobby/wallet data changes on a timescale of seconds (ticket
+    // sales, game status, balances), but Next's client Router Cache
+    // otherwise reuses a dynamic segment's RSC payload for 30s after a
+    // visit — so navigating back to the lobby right after a game finishes
+    // can show a just-completed game as still open for tickets. Disabling
+    // that reuse keeps every navigation showing current server state.
+    staleTimes: {
+      dynamic: 0,
+    },
   },
   async headers() {
     // Baseline CSP, not a nonce-based strict one — 'unsafe-inline'/'unsafe-eval'
