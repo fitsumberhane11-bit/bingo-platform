@@ -60,6 +60,15 @@ export function withApiHandler<Args extends unknown[]>(
       if (err instanceof ProviderNotConfiguredError) {
         return NextResponse.json(apiError("PROVIDER_NOT_CONFIGURED", err.message), { status: 503 });
       }
+      // req.json() throws a bare SyntaxError (not a ZodError/AppError) on a
+      // missing or malformed request body — a client mistake, not a server
+      // fault, so it belongs on the 400 branch rather than falling through
+      // to the generic 500 handler below.
+      if (err instanceof SyntaxError) {
+        return NextResponse.json(apiError("VALIDATION_ERROR", "Invalid or missing request body."), {
+          status: 400,
+        });
+      }
       // eslint-disable-next-line no-console
       console.error("Unhandled API error:", err);
       return NextResponse.json(apiError("INTERNAL_ERROR", "Something went wrong. Please try again."), {

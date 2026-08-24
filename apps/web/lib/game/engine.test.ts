@@ -17,6 +17,7 @@ import {
 } from "./engine";
 import { purchaseTickets } from "./tickets";
 import { applyPlatformLedgerEntry } from "./platform-ledger";
+import { getGameBroadcaster } from "./broadcaster";
 
 // Integration tests — require a real Postgres reachable via DATABASE_URL.
 
@@ -278,6 +279,47 @@ describe("simultaneous winners share the prize pool", () => {
     expect(winners[0]!.calledSequenceNumber).toBe(winners[1]!.calledSequenceNumber);
     const totalPaid = winners.reduce((sum, w) => sum.plus(w.prizeAmount), winners[0]!.prizeAmount.minus(winners[0]!.prizeAmount));
     expect(totalPaid.toNumber()).toBeGreaterThan(0);
+  }, 30000);
+});
+
+describe("the game:winner broadcast carries the winner's username", () => {
+  it("includes a real username, not a blank placeholder, so spectators see who won live", async () => {
+    // Regression test: the client used to hardcode username: "" for this
+    // event (see GameRoom.tsx history), so every non-winning player saw
+    // only "Ticket #N won" with no identity, contradicting the product
+    // requirement that spectators see who won — found live in the browser,
+    // fixed by including `user: { select: { username: true } }` in
+    // winners.ts's ticket query and publishing it on the broadcast.
+    const game = await makeGame({ maxPlayers: 5 });
+    await scheduleGame(game.id, adminId);
+    await openGame(game.id, adminId);
+    await purchaseTickets({ gameId: game.id, userId: playerAId, ticketCount: 1 });
+    await startGame(game.id, adminId);
+    await vi.waitFor(async () => {
+      const g = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+      expect(g.status).toBe("LIVE");
+    }, { timeout: 15000, interval: 200 });
+
+    const gameRow = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+    const seed = decryptSecret(gameRow.secretSeedEncrypted!);
+    const { card, callsNeeded } = await craftWinningCard(seed, 0);
+    const ticket = await prisma.bingoTicket.findFirstOrThrow({ where: { gameId: game.id, userId: playerAId } });
+    await prisma.bingoTicket.update({ where: { id: ticket.id }, data: { cardNumbers: card as unknown as object } });
+
+    const publishSpy = vi.spyOn(getGameBroadcaster(), "publish");
+    let lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+    for (let i = 0; i < callsNeeded && lastGame.status === "LIVE"; i++) {
+      await callNextNumber(game.id, adminId);
+      lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+    }
+
+    const player = await prisma.user.findUniqueOrThrow({ where: { id: playerAId } });
+    const winnerCall = publishSpy.mock.calls.find((call) => call[1] === "game:winner");
+    expect(winnerCall).toBeDefined();
+    const payload = winnerCall![2] as { username?: string; ticketId?: string };
+    expect(payload.username).toBe(player.username);
+    expect(payload.ticketId).toBe(ticket.id);
+    publishSpy.mockRestore();
   }, 30000);
 });
 

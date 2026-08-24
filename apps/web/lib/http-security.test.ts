@@ -568,4 +568,26 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
     const secondCancelBody = await secondCancel.json();
     expect(secondCancelBody.error.code).not.toBe("INTERNAL_ERROR");
   });
+
+  it("a malformed or missing JSON request body returns a clean 400, not a 500", async () => {
+    // req.json() throws a bare SyntaxError here — a client mistake, not a
+    // server fault. Bypasses the apiFetch helper (which always JSON.stringifies
+    // opts.body) to send a genuinely unparseable body.
+    const malformed = await fetch(`${BASE_URL}/api/tickets/purchase`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: playerACookie },
+      body: "{not valid json",
+    });
+    expect(malformed.status).toBe(400);
+    const malformedBody = await malformed.json();
+    expect(malformedBody.error.code).not.toBe("INTERNAL_ERROR");
+
+    const empty = await fetch(`${BASE_URL}/api/tickets/purchase`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: playerACookie },
+    });
+    expect(empty.status).toBe(400);
+    const emptyBody = await empty.json();
+    expect(emptyBody.error.code).not.toBe("INTERNAL_ERROR");
+  });
 });

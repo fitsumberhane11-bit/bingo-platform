@@ -1,10 +1,10 @@
-import { Wallet as WalletIcon } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 import { LogoutButton } from "./LogoutButton";
 import { SidebarNav, BottomNav } from "./SidebarNav";
 import { TestMoneyBanner } from "./TestMoneyBanner";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { SessionKeepAlive } from "./SessionKeepAlive";
+import { HeaderWalletBalance } from "./HeaderWalletBalance";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -37,10 +37,7 @@ export async function AppShell({ children, user, walletBalance }: AppShellProps)
             <BrandMark size="sm" />
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700">
-              <WalletIcon className="h-3.5 w-3.5" />
-              ETB {walletBalance}
-            </div>
+            <HeaderWalletBalance initialBalance={walletBalance} />
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-ink-900">{user.fullName}</p>
               <p className="text-xs text-slate-500">@{user.username}</p>

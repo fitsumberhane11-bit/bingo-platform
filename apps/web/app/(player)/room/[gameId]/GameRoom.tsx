@@ -66,7 +66,13 @@ export function GameRoom({
   const [winners, setWinners] = useState<WinnerEntry[]>(initialSnapshot.winners);
   const [activeTicketIdx, setActiveTicketIdx] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [winnerBanner, setWinnerBanner] = useState<{ ticketNumber: number; prizeAmount: string; winnerCount: number; mine: boolean } | null>(null);
+  const [winnerBanner, setWinnerBanner] = useState<{
+    ticketNumber: number;
+    username: string;
+    prizeAmount: string;
+    winnerCount: number;
+    mine: boolean;
+  } | null>(null);
   const [buying, setBuying] = useState(false);
   const [buyCount, setBuyCount] = useState(1);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -164,6 +170,7 @@ export function GameRoom({
       const mine = myTicketIds.current.has(data.ticketId);
       setWinnerBanner({
         ticketNumber: data.ticketNumber,
+        username: data.username ?? "",
         prizeAmount: data.prizeAmount,
         winnerCount: data.winnerCount,
         mine,
@@ -173,7 +180,7 @@ export function GameRoom({
         {
           ticketId: data.ticketId,
           ticketNumber: data.ticketNumber,
-          username: "",
+          username: data.username ?? "",
           prizeAmount: data.prizeAmount,
           ballNumberAtWin: 0, // not shown in the results UI — the live game:winner event doesn't carry it
           isMine: mine,
@@ -282,7 +289,12 @@ export function GameRoom({
         <div className={clsx("card text-center", winnerBanner.mine ? "bg-gold-500 text-ink-900" : "bg-brand-50")}>
           <p className="text-lg font-extrabold">🎉 BINGO! 🎉</p>
           <p className="text-sm">
-            {winnerBanner.mine ? "You won!" : `Ticket #${winnerBanner.ticketNumber} won`} — ETB {winnerBanner.prizeAmount}
+            {winnerBanner.mine
+              ? "You won!"
+              : winnerBanner.username
+                ? `${winnerBanner.username} won`
+                : `Ticket #${winnerBanner.ticketNumber} won`}{" "}
+            — ETB {winnerBanner.prizeAmount}
             {winnerBanner.winnerCount > 1 && ` (split ${winnerBanner.winnerCount} ways)`}
           </p>
         </div>
@@ -360,6 +372,7 @@ export function GameRoom({
               {activeTicket && (
                 <PlayerCard
                   key={activeTicket.id}
+                  ticketId={activeTicket.id}
                   card={activeTicket.cardNumbers}
                   calledSet={calledSet}
                   won={activeTicket.status === "WINNER"}
@@ -542,11 +555,35 @@ function BingoBoard({ calledSet }: { calledSet: Set<number> }) {
   );
 }
 
-function PlayerCard({ card, calledSet, won, manualMark }: { card: Card; calledSet: Set<number>; won: boolean; manualMark: boolean }) {
+function PlayerCard({
+  ticketId,
+  card,
+  calledSet,
+  won,
+  manualMark,
+}: {
+  ticketId: string;
+  card: Card;
+  calledSet: Set<number>;
+  won: boolean;
+  manualMark: boolean;
+}) {
   // Purely a UI affordance — the server determines winners from calledNumbers
   // directly and never looks at this set. Manual mode just means the player
   // has to tap a called number to "dab" it, mimicking a physical card.
-  const [dabbed, setDabbed] = useState<Set<number>>(new Set());
+  // Persisted to localStorage per ticket so a refresh or reconnect (a real
+  // scenario, not an edge case — a dropped connection, a phone locking,
+  // switching apps) doesn't wipe out marks the player already made.
+  const dabStorageKey = `bingo-dabbed:${ticketId}`;
+  const [dabbed, setDabbed] = useState<Set<number>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = window.localStorage.getItem(dabStorageKey);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
 
   function toggleDab(value: number) {
     if (!manualMark || !calledSet.has(value)) return;
@@ -554,6 +591,11 @@ function PlayerCard({ card, calledSet, won, manualMark }: { card: Card; calledSe
       const next = new Set(prev);
       if (next.has(value)) next.delete(value);
       else next.add(value);
+      try {
+        window.localStorage.setItem(dabStorageKey, JSON.stringify([...next]));
+      } catch {
+        /* localStorage unavailable (private browsing, quota) — marks just won't survive a reload */
+      }
       return next;
     });
   }

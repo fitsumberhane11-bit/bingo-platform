@@ -32,6 +32,7 @@ export async function detectAndRecordWinners(
 
   const activeTickets = await prisma.bingoTicket.findMany({
     where: { gameId: game.id, status: "ACTIVE" },
+    include: { user: { select: { username: true } } },
   });
 
   const candidates: { ticket: (typeof activeTickets)[number]; winningPositions: ReturnType<typeof evaluatePattern>["winningPositions"] }[] = [];
@@ -160,6 +161,7 @@ export async function detectAndRecordWinners(
     getGameBroadcaster().publish(game.id, "game:winner", {
       ticketId: candidate.ticket.id,
       userId: candidate.ticket.userId,
+      username: candidate.ticket.user.username,
       ticketNumber: candidate.ticket.ticketNumber,
       prizeAmount: prizeAmount.toString(),
       winnerCount: resolvedCandidates.length,
