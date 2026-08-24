@@ -51,6 +51,7 @@ export function DepositForm() {
   const [loading, setLoading] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showTestControls, setShowTestControls] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -97,6 +98,16 @@ export function DepositForm() {
     try {
       const res = await apiPost<{ payment: Payment }>(CREATE_ENDPOINT[selectedProvider], { amount: Number(amount) });
       setPayment(res.payment);
+      // DEMO balance should feel instant, like a real deposit that just
+      // cleared — the mock provider still goes through the exact same
+      // create -> simulate -> callback path real providers use (proving
+      // idempotency etc.), we just trigger the "success" step automatically
+      // instead of making every demo player click through it. Manual
+      // control over other outcomes (pending/failed/etc.) is still
+      // available below for testing.
+      if (res.payment.provider === "MOCK") {
+        await simulate("SUCCESS", 1, res.payment.id);
+      }
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -104,11 +115,12 @@ export function DepositForm() {
     }
   }
 
-  async function simulate(outcome: "SUCCESS" | "PENDING" | "FAILED" | "CANCELLED" | "EXPIRED", repeat = 1) {
-    if (!payment) return;
+  async function simulate(outcome: "SUCCESS" | "PENDING" | "FAILED" | "CANCELLED" | "EXPIRED", repeat = 1, paymentId?: string) {
+    const id = paymentId ?? payment?.id;
+    if (!id) return;
     setSimulating(true);
     try {
-      const res = await apiPost<{ payment: Payment }>(`/api/payments/mock/${payment.id}/simulate`, { outcome, repeat });
+      const res = await apiPost<{ payment: Payment }>(`/api/payments/mock/${id}/simulate`, { outcome, repeat });
       setPayment(res.payment);
       if (!OPEN_STATUSES.has(res.payment.status)) refreshBalance();
     } catch (err) {
@@ -193,39 +205,55 @@ export function DepositForm() {
           <PaymentStatusCard payment={payment} currency={config.currency} />
 
           {payment.provider === "MOCK" && OPEN_STATUSES.has(payment.status) && (
-            <div className="rounded-xl border border-dashed border-slate-300 p-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Development payment simulator
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button className="btn-primary" disabled={simulating} onClick={() => simulate("SUCCESS")}>
-                  Simulate Success
-                </button>
-                <button className="btn-secondary" disabled={simulating} onClick={() => simulate("PENDING")}>
-                  Simulate Pending
-                </button>
-                <button className="btn-secondary" disabled={simulating} onClick={() => simulate("FAILED")}>
-                  Simulate Failed
-                </button>
-                <button className="btn-secondary" disabled={simulating} onClick={() => simulate("CANCELLED")}>
-                  Simulate Cancelled
-                </button>
-                <button className="btn-secondary" disabled={simulating} onClick={() => simulate("EXPIRED")}>
-                  Simulate Expired
-                </button>
-              </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Loader2 className="h-3 w-3 animate-spin" /> Confirming your DEMO deposit…
             </div>
           )}
 
-          {payment.provider === "MOCK" && payment.status === "SUCCESS" && (
-            <button
-              className="btn-ghost text-xs"
-              disabled={simulating}
-              onClick={() => simulate("SUCCESS", 5)}
-              title="Sends 5 more identical callbacks to prove idempotency — balance should not change."
-            >
-              Send 5 duplicate callbacks (proves your balance won&apos;t change)
-            </button>
+          {payment.provider === "MOCK" && (
+            <div className="border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                className="text-xs text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-600"
+                onClick={() => setShowTestControls((v) => !v)}
+              >
+                {showTestControls ? "Hide" : "Show"} testing controls
+              </button>
+              {showTestControls && (
+                <div className="mt-3 space-y-2 rounded-xl border border-dashed border-slate-300 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Simulate a different outcome (QA only)
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn-secondary" disabled={simulating} onClick={() => simulate("SUCCESS")}>
+                      Success
+                    </button>
+                    <button className="btn-secondary" disabled={simulating} onClick={() => simulate("PENDING")}>
+                      Pending
+                    </button>
+                    <button className="btn-secondary" disabled={simulating} onClick={() => simulate("FAILED")}>
+                      Failed
+                    </button>
+                    <button className="btn-secondary" disabled={simulating} onClick={() => simulate("CANCELLED")}>
+                      Cancelled
+                    </button>
+                    <button className="btn-secondary" disabled={simulating} onClick={() => simulate("EXPIRED")}>
+                      Expired
+                    </button>
+                  </div>
+                  {payment.status === "SUCCESS" && (
+                    <button
+                      className="btn-ghost text-xs"
+                      disabled={simulating}
+                      onClick={() => simulate("SUCCESS", 5)}
+                      title="Sends 5 more identical callbacks to prove idempotency — balance should not change."
+                    >
+                      Send 5 duplicate callbacks (proves your balance won&apos;t change)
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {!OPEN_STATUSES.has(payment.status) && (
@@ -234,6 +262,7 @@ export function DepositForm() {
               onClick={() => {
                 setPayment(null);
                 setAmount("");
+                setShowTestControls(false);
               }}
             >
               Make another deposit

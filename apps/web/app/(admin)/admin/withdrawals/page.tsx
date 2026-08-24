@@ -81,7 +81,7 @@ export default async function AdminWithdrawalsPage({
       <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 pr-3">Player</th>
               <th className="py-2 pr-3">Method</th>
               <th className="py-2 pr-3">Destination</th>
@@ -128,7 +128,7 @@ export default async function AdminWithdrawalsPage({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="card">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-bold text-ink-900">{value}</p>
     </div>
   );

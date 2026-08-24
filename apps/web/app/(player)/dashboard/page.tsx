@@ -61,7 +61,8 @@ export default async function DashboardPage() {
 
       {!user.emailVerifiedAt && (
         <Alert variant="info">
-          Please verify your email to unlock deposits and gameplay. Check your inbox for the verification link.
+          Verify your email to secure your account for later. You&apos;re all set to play with DEMO balance right
+          now — verification isn&apos;t required in this test version.
         </Alert>
       )}
 
@@ -203,7 +204,7 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
   return (
     <div className="card">
       <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">{icon}</div>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-0.5 text-lg font-bold text-ink-900">{value}</p>
     </div>
   );

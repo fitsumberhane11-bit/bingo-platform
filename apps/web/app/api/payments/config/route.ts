@@ -20,10 +20,15 @@ export const GET = withApiHandler(async () => {
   const providers = [
     ...providerMeta.map(({ id, label }) => {
       const available = getPaymentProvider(id).isConfigured;
-      return { id, label, available, description: available ? `Deposit securely using ${label}` : "Currently unavailable" };
+      return {
+        id,
+        label,
+        available,
+        description: available ? `Deposit securely using ${label}` : "Coming soon — after the demo phase",
+      };
     }),
     ...(isMockProviderAvailable()
-      ? [{ id: "MOCK" as const, label: "Mock Payment (dev only)", available: true, description: "Development testing only" }]
+      ? [{ id: "MOCK" as const, label: "Add DEMO Balance", available: true, description: "Instant — no real money involved" }]
       : []),
   ];
 

@@ -97,7 +97,7 @@ export default async function AdminPaymentDetailPage({ params }: { params: { pay
         ) : (
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-slate-100 uppercase tracking-wide text-slate-400">
+              <tr className="border-b border-slate-100 uppercase tracking-wide text-slate-500">
                 <th className="py-2 pr-3">Received</th>
                 <th className="py-2 pr-3">Signature</th>
                 <th className="py-2 pr-3">Result</th>

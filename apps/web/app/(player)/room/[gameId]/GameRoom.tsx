@@ -21,6 +21,7 @@ export interface GameSnapshot {
     id: string;
     name: string;
     status: string;
+    registrationCloseAt: string;
     ticketPrice: string;
     maxPlayers: number;
     maxTicketsPerPlayer: number;
@@ -55,6 +56,7 @@ export function GameRoom({
   isAuthenticated: boolean;
 }) {
   const [status, setStatus] = useState(initialSnapshot.game.status);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [calledNumbers, setCalledNumbers] = useState<CalledNumber[]>(initialSnapshot.calledNumbers);
   const [playerCount, setPlayerCount] = useState(initialSnapshot.playerCount);
   const [ticketCount, setTicketCount] = useState(initialSnapshot.ticketCount);
@@ -73,6 +75,15 @@ export function GameRoom({
   const [soundSettings, setSoundSettingsState] = useState<SoundSettings>(() => getSoundSettings());
 
   useEffect(() => subscribeSoundSettings(setSoundSettingsState), []);
+
+  useEffect(() => {
+    // Registration can lapse (registrationCloseAt passing) without any SSE
+    // event firing, since it isn't a game-status transition — poll the
+    // clock so the buy panel doesn't keep offering tickets the server has
+    // already stopped accepting.
+    const interval = setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function refreshWallet() {
     if (!isAuthenticated) return;
@@ -206,7 +217,8 @@ export function GameRoom({
     }
   }
 
-  const canBuy = status === "OPEN" || status === "FULL";
+  const registrationClosed = nowMs > new Date(initialSnapshot.game.registrationCloseAt).getTime();
+  const canBuy = (status === "OPEN" || status === "FULL") && !registrationClosed;
   const activeTicket = tickets[activeTicketIdx];
   const activeAnnouncements = announcements.filter((a) => !a.expiresAt || new Date(a.expiresAt) > new Date());
 
@@ -280,7 +292,7 @@ export function GameRoom({
 
       {/* Current number */}
       <div className="card flex flex-col items-center justify-center py-8">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Current number</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Current number</p>
         {currentNumber ? (
           <div key={currentNumber.sequenceNumber} className="animate-ball-pop text-center">
             <p className="text-2xl font-black text-brand-600">{currentNumber.letter}</p>
@@ -294,7 +306,7 @@ export function GameRoom({
 
       {/* Called history */}
       <div className="card">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Recent calls</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recent calls</p>
         <div className="flex flex-wrap gap-1.5">
           {[...calledNumbers]
             .slice(-15)
@@ -312,11 +324,12 @@ export function GameRoom({
         <BingoBoard calledSet={calledSet} />
 
         <div className="card">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">My card</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">My card</p>
           {tickets.length === 0 ? (
             <BuyTicketPanel
               canBuy={canBuy}
               status={status}
+              registrationClosed={registrationClosed}
               isAuthenticated={isAuthenticated}
               ticketPrice={initialSnapshot.game.ticketPrice}
               maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer}
@@ -357,6 +370,7 @@ export function GameRoom({
                 <BuyTicketPanel
                   canBuy={canBuy}
                   status={status}
+                  registrationClosed={registrationClosed}
                   isAuthenticated={isAuthenticated}
                   ticketPrice={initialSnapshot.game.ticketPrice}
                   maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer - tickets.length}
@@ -446,7 +460,7 @@ function ResultsScreen({ gameId, winners, prizePool, calledCount }: { gameId: st
 
       {winners.length > 0 ? (
         <div className="mx-auto max-w-sm space-y-2 text-left">
-          <p className="text-center text-xs font-semibold uppercase tracking-wide text-slate-400">Winners</p>
+          <p className="text-center text-xs font-semibold uppercase tracking-wide text-slate-500">Winners</p>
           {winners.map((w) => (
             <div
               key={w.ticketId}
@@ -484,8 +498,8 @@ function StatusPill({ status }: { status: string }) {
     LIVE: "bg-red-50 text-red-600",
     PAUSED: "bg-amber-50 text-amber-700",
     OPEN: "bg-brand-50 text-brand-700",
-    COMPLETED: "bg-slate-100 text-slate-500",
-    CANCELLED: "bg-slate-100 text-slate-500",
+    COMPLETED: "bg-slate-100 text-slate-600",
+    CANCELLED: "bg-slate-100 text-slate-600",
   };
   return (
     <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", styles[status] ?? "bg-slate-100 text-slate-600")}>
@@ -498,7 +512,7 @@ function StatusPill({ status }: { status: string }) {
 function BingoBoard({ calledSet }: { calledSet: Set<number> }) {
   return (
     <div className="card">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Bingo board</p>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Bingo board</p>
       <div className="grid grid-cols-5 gap-1">
         {LETTERS.map((letter) => (
           <div key={letter} className="pb-1 text-center text-xs font-bold text-brand-600">
@@ -595,17 +609,19 @@ function PlayerCard({ card, calledSet, won, manualMark }: { card: Card; calledSe
 const NOT_YET_OPEN_STATUSES = new Set(["DRAFT", "SCHEDULED"]);
 const ALREADY_STARTED_STATUSES = new Set(["STARTING", "LIVE", "PAUSED"]);
 
-function ticketSalesMessage(status: string): string {
+function ticketSalesMessage(status: string, registrationClosed: boolean): string {
   if (NOT_YET_OPEN_STATUSES.has(status)) return "Ticket sales haven't opened for this game yet — check back soon.";
   if (ALREADY_STARTED_STATUSES.has(status)) return "This game has already started, so ticket sales are closed.";
   if (status === "CANCELLED") return "This game was cancelled.";
   if (status === "COMPLETED") return "This game has ended.";
+  if (registrationClosed) return "Ticket sales have closed for this game — it's about to start.";
   return "Ticket sales are closed for this game.";
 }
 
 function BuyTicketPanel({
   canBuy,
   status,
+  registrationClosed,
   isAuthenticated,
   ticketPrice,
   maxTicketsPerPlayer,
@@ -618,6 +634,7 @@ function BuyTicketPanel({
 }: {
   canBuy: boolean;
   status: string;
+  registrationClosed: boolean;
   isAuthenticated: boolean;
   ticketPrice: string;
   maxTicketsPerPlayer: number;
@@ -639,7 +656,11 @@ function BuyTicketPanel({
     );
   }
   if (!canBuy) {
-    return <p className={compact ? "mt-3 text-xs text-slate-400" : "py-6 text-center text-sm text-slate-400"}>{ticketSalesMessage(status)}</p>;
+    return (
+      <p className={compact ? "mt-3 text-xs text-slate-400" : "py-6 text-center text-sm text-slate-400"}>
+        {ticketSalesMessage(status, registrationClosed)}
+      </p>
+    );
   }
   return (
     <div className={compact ? "mt-4 border-t border-slate-100 pt-4" : ""}>

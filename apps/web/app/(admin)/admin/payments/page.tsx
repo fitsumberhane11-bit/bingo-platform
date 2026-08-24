@@ -84,7 +84,7 @@ export default async function AdminPaymentsPage({
       <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 pr-3">User</th>
               <th className="py-2 pr-3">Provider</th>
               <th className="py-2 pr-3">Amount</th>
@@ -163,7 +163,7 @@ function PageLink({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="card">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-bold text-ink-900">{value}</p>
     </div>
   );

@@ -63,7 +63,7 @@ export default async function ProfilePage() {
 function Field({ label, value, verified }: { label: string; value: string; verified?: boolean }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</dt>
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
       <dd className="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-ink-900">
         {value}
         {verified === true && <CheckCircle2 className="h-3.5 w-3.5 text-brand-600" aria-label="Verified" />}

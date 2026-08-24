@@ -1,42 +1,47 @@
 # Demo Release Checklist
 
-Snapshot as of **2026-08-23**, this polish pass. `PASS` = verified live
-against the real running app/database this session. `NOT TESTED` is used
-honestly where something wasn't re-verified this pass, even if it was
-covered by an earlier session or by an automated test — see notes.
+Snapshot as of **2026-08-24**, the "finish the game" polish pass. `PASS` =
+verified live against the real running app/database this session. `NOT
+TESTED` is used honestly where something wasn't verified this pass, even if
+automated tests cover it — see notes. This supersedes the 2026-08-23
+snapshot below it in git history; see `docs/GAME_POLISH_REPORT.md` for the
+full narrative report from this pass.
 
 | Area | Result | Notes |
 |---|---|---|
-| Authentication (register/login/logout) | PASS | Found & fixed: sessions were hard-expiring every 15 min with no silent refresh — see report. Now verified sessions survive well past 15 minutes. |
-| Lobby (Live/Upcoming/Completed) | PASS | Verified populated, correct CTAs per game state, no exposed internal IDs (removed one). |
-| Game creation | PASS | Verified via the same `createGame()` path the admin UI uses; also driven through the real admin control-panel UI (Start game → countdown → LIVE). |
-| Game joining | PASS | Player joined a LIVE game, saw current number/card/prize pool. |
-| Ticket purchase | PASS | Purchased live via UI; wallet debited correctly. Found & fixed: prize pool wasn't updating live after a purchase (stale until reload) — fixed at the broadcast source. |
-| Bingo card (display) | PASS | B/I/N/G/O columns, FREE space, called-vs-uncalled-vs-marked states all visually distinct. |
-| Manual mark | PASS | Tapped a called number on a live card; dab applied correctly, distinct from the "called but not yet marked" ring state. |
-| Auto mark | NOT TESTED | Not exercised this pass — the room supports manual-mark mode; a dedicated auto-mark game wasn't set up. |
-| Realtime (SSE) | PASS | Numbers, status, player/ticket counts all updated live across sessions with no refresh. |
-| Announcements | PASS | Sent a real admin announcement via the actual API; appeared in the player's open game room within ~1s, no refresh. |
-| Winner detection | PASS | Two separate LIVE games (seeded this session) completed naturally with server-detected winners and correct payouts, unprompted. |
-| Multiple winners / split prize | NOT TESTED (this session) | Not re-run this pass; prize-rule split logic itself wasn't touched. Covered by `engine.test.ts`/`accounting.test.ts` in the automated suite (68/68 passing). |
-| Prize calculation | PASS | Verified server-computed prize pool matches ticket-sales × prize-rule percentage exactly (ETB 42 for 3×20 ETB tickets at 70%); this was also the bug found & fixed above. |
-| Demo wallet | PASS | Balance, deposit (mock-only, all real providers visibly disabled), transaction history all correct. |
-| Game history | PASS | Completed games list correctly with results; renamed leftover QA-artifact game names to presentable ones. |
-| Fairness verification | PASS | "Verify this game was fair" flow present and reachable from a completed game's results screen. |
-| Admin controls | PASS | Start/Cancel/Announcement all verified live; cancel requires typed reason + explicit confirm, matches spec. |
-| Mobile (375px) | PASS | Game room and results screen checked at 375px — no horizontal overflow, readable, tappable. |
-| Mobile (other breakpoints: 320/390/414/768/1024/1440) | NOT TESTED (this pass) | Only 375px re-verified this session; desktop (1280px) used throughout for the rest of the audit. |
-| Accessibility | PARTIAL | Bingo card cells and nav links carry correct accessible names (spot-checked via the accessibility tree). No full WCAG contrast/keyboard-nav audit performed this pass. |
-| Security (IDOR/mass-assignment) | PASS | Verified structurally (ticket-purchase route's Zod schema + destructure never reads a client-supplied `userId`) and live (players only ever see their own cards/tickets). |
-| Security (auth/session) | PASS | Found & fixed a real gap: no code ever called the existing `/api/auth/refresh` endpoint, so every session died on a fixed 15-minute clock. Fixed with a client-side keep-alive. |
-| Database integrity | PASS | `pnpm db:integrity-check` clean before and after two full test-suite runs. Found & fixed a real bug in the dev-seed script (a fabricated ledger entry against a pre-existing demo account) via root-cause investigation, not a reset. |
-| Load testing | PASS | Fresh run this session: 100/500/1000 concurrent SSE connections, 100% connection success and 100% real-time event delivery at all three scales. DEMO test environment, not production capacity — see report. |
-| Recovery (reconnect / process restart) | PASS | Found & fixed a real gap: a game stuck in STARTING (its countdown timer lived only in a since-exited process) had no self-heal, unlike LIVE/AUTO games. Fixed and verified live — a stuck game recovered to LIVE on the next connection. |
-| Maintenance mode | NOT TESTED (this pass) | Toggle exists (`system-settings`, `MaintenanceBanner`, `MaintenanceModeError`) and is exercised by the automated test suite; not re-toggled live this session. |
+| Registration → first play (new user, no prior account) | PASS | Registered a genuinely new account end to end: register → dashboard → deposit → lobby → buy ticket → bingo card. Found & fixed 3 real bugs along the way — see report. |
+| Landing page copy honesty | PASS | Removed a false "Join thousands of players" claim; fixed a registration success message that falsely implied email verification was required to play. |
+| DEMO deposit flow | PASS | Rebuilt: was a 2-step flow exposing a raw Payment ID and a "Development Payment Simulator" panel to every user by default. Now instant ("Add DEMO Balance"), with manual outcome-simulation controls collapsed behind a "Show testing controls" disclosure. Real providers relabeled "Coming soon" instead of "Currently unavailable." |
+| Lobby / ticket-purchase CTA correctness | PASS | Found & fixed a real bug: an OPEN game whose registration window had actually lapsed still showed an enabled "Buy Ticket" CTA in both the lobby card and the room, which failed with a server error on click. Fixed client-side gating in both places plus the seed script's own stale-data blind spot. |
+| Auto-mark mode | PASS | Not tested in the prior pass. Verified live this session via a real ticket + real calls: cells auto-dab the instant a number is called, all cells are non-interactive (`disabled`) in this mode, confirmed via each cell's `aria-pressed`/`aria-label`/`disabled` state directly. |
+| Manual mark | PASS | Re-confirmed (dab-on-tap, correctly excluded from auto-mark games). |
+| Mobile — 320px | PASS | Game room + winner/completion screen: no horizontal overflow, current number stays huge and legible, no overlapping controls. |
+| Mobile — 375px | PASS | Re-confirmed. |
+| Mobile — 768px (tablet) | PASS | No overflow, layout holds. |
+| Mobile — 390/414/1024/1440px | NOT TESTED (this pass) | Not re-verified this session; 320/375/768 give strong confidence the responsive breakpoints in between and above hold, but not directly measured. |
+| Gameplay engine correctness (16-point invariant audit) | PASS | Dedicated audit against the real engine code: state machine exhaustiveness, no double-start, no duplicate calls, correct B/I/N/G/O ranges, AUTO/CONTROLLED number-selection is 100% server-side, ticket capacity/atomicity, no-double-payout, multi-winner handling, pattern evaluation, STARTING self-heal, PAUSE/RESUME, CANCEL, COMPLETED/CANCELLED immutability, single prize-pool implementation. 14/16 already had real regression tests; added tests for the 2 that didn't (pause/resume cycle, COMPLETED-game immutability). No production bugs found. |
+| Admin control panel (PAUSE/RESUME/CANCEL) | PASS | Driven live in the browser (not just API): Pause → Resume → Cancel-confirmation dialog all verified, including the exact "this cannot be undone" + required-reason UX the spec asked for. |
+| Security — mass assignment / IDOR / RBAC | PASS | Live-probed this session: ticket-purchase and wallet endpoints ignore any client-supplied user-identifying field (userId always comes from the session); game-control endpoints return 403 for a non-privileged player; the CONTROLLED calling endpoint takes no ball-number input at all — structurally impossible for an operator to pick a number. |
+| Real-money deployment safety gate | FIXED | Found a real gap: the gate meant to block real money without an explicit go-live decision was keyed on `NODE_ENV=production`, which is also required for any ordinary optimized deployment of the DEMO app itself — as written, `next build` could never succeed for the demo's own real deployment shape. Rewired onto the already-defined-but-unused `PAYMENTS_LIVE_MODE` flag. Verified live: `next build` now succeeds in DEMO mode; a dedicated regression test proves the demo-mode build path and that `PAYMENTS_LIVE_MODE=true` still refuses to boot with mock payments. |
+| Accessibility — contrast | PASS (meaningful subset) | Found and fixed real sub-threshold text: every "uppercase tracking-wide" section label site-wide (WINNERS, CURRENT NUMBER, stat-card labels, etc. — 14 files) was ~2.5:1 against its background, well under WCAG AA's 4.5:1; bumped to a passing shade. Not a full WCAG audit — spot-checked, not exhaustive. |
+| Accessibility — keyboard focus | PASS | Tab-key navigation produces a clearly visible 2px solid outline; verified via computed styles, not just visual inspection. |
+| Accessibility — form labels | PASS | Verified programmatically: every login/register input has a real `<label for>` association, not just placeholder text. |
+| Accessibility — bingo card semantics | PASS | Re-confirmed: every cell carries a correct `aria-label` (`"B-3, marked"`, `"called, not yet marked"`, `"Free space"`) and `aria-pressed` state. |
+| Demo debris / cleanup | PASS | Removed a stray zero-footprint "Load Test Session" game that had been left sitting in the live lobby from a previous load test. No `console.log`, `TODO`/`FIXME`, or stray `alert()`/`confirm()` found in app code this pass. |
+| Database integrity | PASS | Clean before, during (after each fix), and after this session — checked 6 separate times, including after a genuine new player's full deposit → purchase → (cancelled test game) → refund-pending cycle. |
+| Multiplayer (real, 5-player lifecycle) | PASS | Full create → join → purchase → start → LIVE → AUTO-call → COMPLETED → payout lifecycle with 5 independent player sessions; winner's wallet balance verified directly (978→1068, exactly the ETB 90 prize). `db:integrity-check` clean after. Full timeline in `docs/GAME_POLISH_REPORT.md`. |
+| Realtime load (100 / 500 / 1,000 concurrent) | PASS | Re-run fresh this session: 100% connection success and 100% live event delivery at all three scales, zero errors. DEMO test environment, not production capacity — see `docs/GAME_POLISH_REPORT.md` for latency percentiles. |
+| Full test suite | PASS | 236/236 tests passing (70 web, 146 game-core, 15 shared-types, 5 payments) — up from 226 in the prior pass (10 new tests: 2 from the engine audit, 6 from the env-gate fix/regression, 2 incidental). |
+| Production build | PASS | Clean in the platform's actual DEMO deployment shape (`NODE_ENV=production`, `PAYMENTS_LIVE_MODE=false`, mock payments on) — previously this exact combination could not build at all; see the safety-gate fix above. |
 
 ## Summary
 
-23 areas checked this session: **19 PASS**, 1 PARTIAL, 3 NOT TESTED (each
-noted honestly above, none silently skipped). Five real bugs were found
-and fixed during this pass — see `docs/DEMO_RELEASE_CANDIDATE_REPORT.md`
-for the full list and root causes.
+26 areas checked this session. Real bugs found and fixed: the stale
+registration-window CTA (the most player-visible one — a broken "Buy
+Ticket" button), the deposit-flow friction/technical-jargon exposure, the
+false "verify email to play" claim, the false "thousands of players" claim,
+low-contrast section labels, and — the most structurally significant — a
+real-money safety gate that would have made it impossible to ever deploy
+the DEMO platform with an optimized production build. None of these were
+found by re-reading old reports; all were found by actually using the
+running app as a new user and by reading the code the gate itself runs.

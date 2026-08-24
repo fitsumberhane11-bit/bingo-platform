@@ -463,6 +463,78 @@ describe("invalid transitions are rejected end to end", () => {
   });
 });
 
+describe("pause / resume preserves the call sequence", () => {
+  it("stops accepting calls while PAUSED and resumes with no numbers lost or duplicated", async () => {
+    const game = await makeGame({ maxPlayers: 5, minPlayers: 1 });
+    await scheduleGame(game.id, adminId);
+    await openGame(game.id, adminId);
+    await purchaseTickets({ gameId: game.id, userId: playerAId, ticketCount: 1 });
+    await startGame(game.id, adminId);
+    await vi.waitFor(async () => {
+      const g = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+      expect(g.status).toBe("LIVE");
+    }, { timeout: 15000, interval: 200 });
+
+    await callNextNumber(game.id, adminId);
+    await callNextNumber(game.id, adminId);
+    const beforePause = await prisma.bingoNumber.findMany({ where: { gameId: game.id }, orderBy: { sequenceNumber: "asc" } });
+    expect(beforePause).toHaveLength(2);
+
+    const paused = await pauseGame(game.id, adminId);
+    expect(paused.status).toBe("PAUSED");
+
+    // No calls can land while PAUSED — callNextNumber only accepts LIVE.
+    await expect(callNextNumber(game.id, adminId)).rejects.toThrow(/PAUSED/);
+    const duringPause = await prisma.bingoNumber.findMany({ where: { gameId: game.id } });
+    expect(duringPause).toHaveLength(2); // unchanged while paused
+
+    const resumed = await resumeGame(game.id, adminId);
+    expect(resumed.status).toBe("LIVE");
+
+    await callNextNumber(game.id, adminId);
+    const afterResume = await prisma.bingoNumber.findMany({ where: { gameId: game.id }, orderBy: { sequenceNumber: "asc" } });
+    expect(afterResume).toHaveLength(3);
+    // Sequence continues 1,2,3 — no gap, no repeat introduced by the pause/resume cycle.
+    expect(afterResume.map((n) => n.sequenceNumber)).toEqual([1, 2, 3]);
+    expect(new Set(afterResume.map((n) => n.ballNumber)).size).toBe(3);
+    // The first two calls are byte-for-byte the same rows as before the pause.
+    expect(afterResume[0]!.ballNumber).toBe(beforePause[0]!.ballNumber);
+    expect(afterResume[1]!.ballNumber).toBe(beforePause[1]!.ballNumber);
+  }, 30000);
+});
+
+describe("completed games are immutable", () => {
+  it("rejects further status transitions, ticket purchases, and number calls once COMPLETED", async () => {
+    const game = await makeGame({ maxPlayers: 5, minPlayers: 1 });
+    await scheduleGame(game.id, adminId);
+    await openGame(game.id, adminId);
+    await purchaseTickets({ gameId: game.id, userId: playerAId, ticketCount: 1 });
+    await startGame(game.id, adminId);
+    await vi.waitFor(async () => {
+      const g = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+      expect(g.status).toBe("LIVE");
+    }, { timeout: 15000, interval: 200 });
+
+    const completed = await completeGame(game.id, adminId, "Forced completion for immutability test.");
+    expect(completed.status).toBe("COMPLETED");
+
+    // No further status transitions.
+    await expect(pauseGame(game.id, adminId)).rejects.toThrow();
+    await expect(resumeGame(game.id, adminId)).rejects.toThrow();
+    await expect(startGame(game.id, adminId)).rejects.toThrow();
+    await expect(cancelGame(game.id, adminId, "too late")).rejects.toThrow();
+
+    // No further ticket purchases.
+    await expect(purchaseTickets({ gameId: game.id, userId: playerBId, ticketCount: 1 })).rejects.toThrow();
+
+    // No further number calls.
+    await expect(callNextNumber(game.id, adminId)).rejects.toThrow(/COMPLETED/);
+
+    const finalGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+    expect(finalGame.status).toBe("COMPLETED"); // still exactly COMPLETED — none of the rejected calls mutated it
+  }, 30000);
+});
+
 describe("cancellation refunds active tickets", () => {
   it("refunds every active ticket and voids them on cancel", async () => {
     const game = await makeGame({ maxPlayers: 5 });

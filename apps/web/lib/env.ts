@@ -62,14 +62,21 @@ export function getEnv(): Env {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
-  if (parsed.data.NODE_ENV === "production" && parsed.data.ENABLE_MOCK_PAYMENTS) {
+  // Gated on PAYMENTS_LIVE_MODE, not NODE_ENV=production: NODE_ENV=production
+  // is just "this is an optimized build" and is required for ANY real
+  // deployment, including this DEMO platform running with test money — a
+  // NODE_ENV-based gate would make it impossible to ever deploy the demo
+  // with `next build`. PAYMENTS_LIVE_MODE is the explicit, deliberate "real
+  // money is now live" switch (see docs/PRODUCTION_READINESS.md's sign-off
+  // section) that actually needs the money-safety checks below.
+  if (parsed.data.PAYMENTS_LIVE_MODE && parsed.data.ENABLE_MOCK_PAYMENTS) {
     throw new Error(
-      "ENABLE_MOCK_PAYMENTS must be false in production. Refusing to boot with mock payments enabled in a production environment.",
+      "ENABLE_MOCK_PAYMENTS must be false when PAYMENTS_LIVE_MODE is true. Refusing to boot with mock payments enabled alongside live payments.",
     );
   }
-  if (parsed.data.NODE_ENV === "production" && parsed.data.GAME_MONEY_MODE !== "REAL") {
+  if (parsed.data.PAYMENTS_LIVE_MODE && parsed.data.GAME_MONEY_MODE !== "REAL") {
     throw new Error(
-      "GAME_MONEY_MODE must be explicitly set to REAL in production. Refusing to boot a production environment still in test-money mode.",
+      "GAME_MONEY_MODE must be explicitly set to REAL when PAYMENTS_LIVE_MODE is true. Refusing to boot a live-payments environment still in test-money mode.",
     );
   }
   cached = parsed.data;

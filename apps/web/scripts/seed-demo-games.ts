@@ -42,13 +42,29 @@ async function getPrizeRuleId(name: string): Promise<string> {
   return rule.id;
 }
 
-async function gameExists(name: string): Promise<boolean> {
-  const existing = await prisma.game.findFirst({ where: { name }, select: { id: true } });
+async function hasGameWithStatus(...statuses: string[]): Promise<boolean> {
+  const existing = await prisma.game.findFirst({ where: { status: { in: statuses as never[] } }, select: { id: true } });
   return existing !== null;
 }
 
-async function hasGameWithStatus(...statuses: string[]): Promise<boolean> {
-  const existing = await prisma.game.findFirst({ where: { status: { in: statuses as never[] } }, select: { id: true } });
+// A game can sit in OPEN/FULL status indefinitely while its registration
+// window has actually lapsed (nothing transitions it out of OPEN just
+// because registrationCloseAt passed) — checking status alone let a stale,
+// no-longer-purchasable game masquerade as "ready" across re-runs of this
+// script days apart. Require the window to still be open too.
+async function hasOpenGameAcceptingRegistration(): Promise<boolean> {
+  const existing = await prisma.game.findFirst({
+    where: { status: { in: ["OPEN", "FULL"] }, registrationCloseAt: { gt: new Date() } },
+    select: { id: true },
+  });
+  return existing !== null;
+}
+
+async function hasUpcomingGameNamed(name: string): Promise<boolean> {
+  const existing = await prisma.game.findFirst({
+    where: { name, startTime: { gt: new Date() } },
+    select: { id: true },
+  });
   return existing !== null;
 }
 
@@ -113,7 +129,7 @@ async function main() {
   // 2. An OPEN game with a couple of tickets already sold, ready for the
   //    walkthrough presenter's own account to buy the last ticket and for
   //    the admin to start it live in front of an audience.
-  if (!(await hasGameWithStatus("OPEN", "FULL"))) {
+  if (!(await hasOpenGameAcceptingRegistration())) {
     console.log("Creating OPEN demo game: Friday Jackpot Bingo");
     const startTime = new Date(now.getTime() + 45 * 60 * 1000);
     const game = await createGame(
@@ -148,7 +164,7 @@ async function main() {
 
   // 3. A further-out SCHEDULED game so "Upcoming" shows more than one
   //    entry and demonstrates scheduling, not just an immediate start.
-  if (!(await gameExists("Sunday Family Bingo"))) {
+  if (!(await hasUpcomingGameNamed("Sunday Family Bingo"))) {
     console.log("Creating SCHEDULED demo game: Sunday Family Bingo");
     const startTime = new Date(now.getTime() + 2 * DAY_MS);
     const scheduled = await createGame(

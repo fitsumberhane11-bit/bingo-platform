@@ -70,7 +70,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: {
       <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 pr-3">Name</th>
               <th className="py-2 pr-3">Contact</th>
               <th className="py-2 pr-3">Roles</th>

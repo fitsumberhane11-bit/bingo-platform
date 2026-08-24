@@ -24,13 +24,25 @@ genuinely blocked on external parties/business decisions, not engineering.
 
 ## Payments
 
-- [x] `ENABLE_MOCK_PAYMENTS=false`, `GAME_MONEY_MODE=REAL`, and
-      `NODE_ENV=production` enforcement confirmed at the actual build/deploy
-      level, not just app boot — `next build` itself now fails closed if
-      these aren't set correctly (verified live: building with
-      `ENABLE_MOCK_PAYMENTS=true` or `GAME_MONEY_MODE=TEST` under
-      `NODE_ENV=production` throws and aborts the build). CI's build step
-      sets both explicitly.
+- [x] `ENABLE_MOCK_PAYMENTS=false` and `GAME_MONEY_MODE=REAL` enforcement
+      confirmed at boot, gated on `PAYMENTS_LIVE_MODE=true` — the explicit
+      "real money is now live" switch, not `NODE_ENV=production`. Fixed a
+      real gap found live during the 2026-08-24 polish pass: the gate was
+      originally keyed on `NODE_ENV=production`, which is also required for
+      any ordinary optimized deployment of the DEMO platform itself — as
+      written, it made it impossible to ever `next build` the demo (a
+      `next build` under `NODE_ENV=production` with the DEMO's own
+      `ENABLE_MOCK_PAYMENTS=true`/`GAME_MONEY_MODE=TEST` settings would
+      always throw and abort). `PAYMENTS_LIVE_MODE` already existed in the
+      schema and in this document's own sign-off line below, but was never
+      actually read by the check — see `lib/env.ts`. Verified live: a
+      `next build` with `NODE_ENV=production`, `PAYMENTS_LIVE_MODE=false`,
+      `ENABLE_MOCK_PAYMENTS=true`, `GAME_MONEY_MODE=TEST` (the real DEMO
+      deployment shape) now succeeds; `lib/env.test.ts` covers both that
+      case and that `PAYMENTS_LIVE_MODE=true` still refuses to boot with
+      mock payments or a non-`REAL` money mode. CI's build step builds in
+      DEMO mode; the gate itself is unit-tested, not re-proven via a second
+      full build.
 - [ ] **Telebirr** — see `docs/TELEBIRR_INTEGRATION.md` for the full research
       record. Remaining steps, in order:
       1. Complete Telebirr merchant onboarding/KYC (business step).

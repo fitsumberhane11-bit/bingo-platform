@@ -151,7 +151,7 @@ function Field({ label, value, verified }: { label: string; value: string; verif
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="card">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-bold text-ink-900">{value}</p>
     </div>
   );

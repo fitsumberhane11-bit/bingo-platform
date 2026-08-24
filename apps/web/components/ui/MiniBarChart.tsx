@@ -20,7 +20,7 @@ export function MiniBarChart({ label, data, prefix = "", color = "#16a34a" }: Mi
   return (
     <div className="card">
       <div className="mb-2 flex items-baseline justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
         <p className="text-sm font-bold text-ink-900">
           {prefix}
           {total.toLocaleString()}

@@ -42,7 +42,7 @@ export default async function AdminGamesPage() {
       <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 pr-3">Name</th>
               <th className="py-2 pr-3">Status</th>
               <th className="py-2 pr-3">Pattern</th>

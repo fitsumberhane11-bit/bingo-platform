@@ -90,7 +90,7 @@ function Step({ title, done, body }: { title: string; done: boolean; body: React
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="mt-2 rounded-lg bg-slate-50 p-2">
-      <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
       <p className={mono ? "break-all font-mono text-xs text-ink-900" : "text-sm text-ink-900"}>{value}</p>
     </div>
   );

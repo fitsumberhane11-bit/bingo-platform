@@ -22,24 +22,24 @@ afterEach(() => {
 });
 
 describe("getEnv production safety gates", () => {
-  it("refuses to boot in production with GAME_MONEY_MODE still TEST", async () => {
-    vi.stubEnv("NODE_ENV", "production");
+  it("refuses to boot with PAYMENTS_LIVE_MODE=true and GAME_MONEY_MODE still TEST", async () => {
+    vi.stubEnv("PAYMENTS_LIVE_MODE", "true");
     vi.stubEnv("GAME_MONEY_MODE", "TEST");
     vi.stubEnv("ENABLE_MOCK_PAYMENTS", "false");
     const getEnv = await getEnvWithFreshModule();
     expect(() => getEnv()).toThrow(/GAME_MONEY_MODE must be explicitly set to REAL/);
   });
 
-  it("refuses to boot in production with mock payments enabled", async () => {
-    vi.stubEnv("NODE_ENV", "production");
+  it("refuses to boot with PAYMENTS_LIVE_MODE=true and mock payments enabled", async () => {
+    vi.stubEnv("PAYMENTS_LIVE_MODE", "true");
     vi.stubEnv("GAME_MONEY_MODE", "REAL");
     vi.stubEnv("ENABLE_MOCK_PAYMENTS", "true");
     const getEnv = await getEnvWithFreshModule();
-    expect(() => getEnv()).toThrow(/ENABLE_MOCK_PAYMENTS must be false in production/);
+    expect(() => getEnv()).toThrow(/ENABLE_MOCK_PAYMENTS must be false when PAYMENTS_LIVE_MODE is true/);
   });
 
-  it("boots cleanly in production with correct real-money configuration", async () => {
-    vi.stubEnv("NODE_ENV", "production");
+  it("boots cleanly with PAYMENTS_LIVE_MODE=true and correct real-money configuration", async () => {
+    vi.stubEnv("PAYMENTS_LIVE_MODE", "true");
     vi.stubEnv("GAME_MONEY_MODE", "REAL");
     vi.stubEnv("ENABLE_MOCK_PAYMENTS", "false");
     const getEnv = await getEnvWithFreshModule();
@@ -51,6 +51,23 @@ describe("getEnv production safety gates", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("GAME_MONEY_MODE", undefined);
     vi.stubEnv("ENABLE_MOCK_PAYMENTS", undefined);
+    const getEnv = await getEnvWithFreshModule();
+    expect(() => getEnv()).not.toThrow();
+    expect(getEnv().GAME_MONEY_MODE).toBe("TEST");
+    expect(getEnv().ENABLE_MOCK_PAYMENTS).toBe(true);
+  });
+
+  it("boots cleanly with an optimized NODE_ENV=production build still in DEMO/test-money mode", async () => {
+    // This is the actual deployment shape for the DEMO platform: `next
+    // build` always runs with NODE_ENV=production (it's a build
+    // optimization mode, not a "real money is live" declaration), while
+    // PAYMENTS_LIVE_MODE stays false until a deliberate go-live decision.
+    // A NODE_ENV-keyed gate would make it impossible to ever deploy the
+    // demo with an optimized build — regression test for that bug.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PAYMENTS_LIVE_MODE", "false");
+    vi.stubEnv("GAME_MONEY_MODE", "TEST");
+    vi.stubEnv("ENABLE_MOCK_PAYMENTS", "true");
     const getEnv = await getEnvWithFreshModule();
     expect(() => getEnv()).not.toThrow();
     expect(getEnv().GAME_MONEY_MODE).toBe("TEST");

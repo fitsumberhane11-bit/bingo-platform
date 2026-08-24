@@ -135,7 +135,7 @@ export function ControlPanel({ gameId }: { gameId: string }) {
       </div>
 
       <div className="card text-center">
-        <p className="text-xs uppercase tracking-wide text-slate-400">Current ball</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500">Current ball</p>
         {currentNumber ? (
           <p className="font-mono text-4xl font-black text-ink-900">
             {currentNumber.letter}-{currentNumber.ballNumber}
@@ -148,7 +148,7 @@ export function ControlPanel({ gameId }: { gameId: string }) {
 
       {/* Controls */}
       <div className="card">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Controls</p>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Controls</p>
         <div className="flex flex-wrap gap-2">
           {game.status === "DRAFT" && (
             <ActionButton icon={CalendarClock} label="Schedule" loading={actionLoading === "schedule"} onClick={() => runAction("schedule", "schedule")} />
@@ -265,7 +265,7 @@ export function ControlPanel({ gameId }: { gameId: string }) {
 
       {/* Fairness */}
       <div className="card">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Provable fairness</p>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Provable fairness</p>
         <p className="break-all font-mono text-xs text-slate-500">{game.seedCommitmentHash}</p>
         <p className="mt-1 text-xs text-slate-400">
           {game.seedRevealed ? "Seed has been revealed — verifiable on the public fairness page." : "Seed remains sealed until the game completes."}
@@ -274,7 +274,7 @@ export function ControlPanel({ gameId }: { gameId: string }) {
 
       {/* Called numbers */}
       <div className="card">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Called numbers ({game.calledNumbers.length})</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Called numbers ({game.calledNumbers.length})</p>
         <div className="flex flex-wrap gap-1.5">
           {game.calledNumbers.map((c) => (
             <span key={c.sequenceNumber} className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-ink-900">
@@ -287,7 +287,7 @@ export function ControlPanel({ gameId }: { gameId: string }) {
 
       {/* Event log */}
       <div className="card">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Event log</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Event log</p>
         <ul className="max-h-72 space-y-1.5 overflow-y-auto text-xs">
           {events.map((e) => (
             <li key={e.id} className="flex items-center justify-between border-b border-slate-50 pb-1.5 last:border-0">
@@ -304,7 +304,7 @@ export function ControlPanel({ gameId }: { gameId: string }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="card py-3 text-center">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className="text-lg font-bold text-ink-900">{value}</p>
     </div>
   );

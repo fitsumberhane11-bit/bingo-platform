@@ -40,9 +40,13 @@ balance, live/upcoming game counts, recent activity feed.
 **Step 3 — Show the DEMO wallet**
 Open **Wallet**. Point out the current balance and transaction history.
 Open **Deposit** — show that Telebirr/CBE/Chapa/ArifPay/M-Pesa are all
-visibly disabled ("Currently unavailable") and only "Mock Payment (dev
-only)" can be selected. This is deliberate: the product cannot be
-mistaken for one that's already handling real money.
+visibly marked "Coming soon — after the demo phase" and only **Add DEMO
+Balance** can be selected, crediting instantly with no real payment step.
+This is deliberate: the product cannot be mistaken for one that's already
+handling real money, while still proving out the same create → confirm →
+ledger path a real provider will use later (a "Show testing controls"
+link on the confirmation screen exposes the pending/failed/cancelled/
+expired outcomes for anyone who wants to see that path too).
 
 **Step 4 — Open the lobby**
 Go to **Play Bingo**. Show the three sections: **Live Now** (a game

@@ -71,7 +71,7 @@ function RegisterForm() {
       </div>
       <div className="card">
         <h1 className="mb-1 text-xl font-bold text-ink-900">Create your account</h1>
-        <p className="mb-6 text-sm text-slate-500">Join thousands of players across Ethiopia.</p>
+        <p className="mb-6 text-sm text-slate-500">Play live multiplayer Bingo with a free DEMO balance.</p>
 
         {formError && (
           <div className="mb-4">

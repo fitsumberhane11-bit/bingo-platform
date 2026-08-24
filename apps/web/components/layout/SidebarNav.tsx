@@ -37,7 +37,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
           <Icon className="h-4 w-4" />
           {item.label}
         </span>
-        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">Soon</span>
+        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Soon</span>
       </div>
     );
   }

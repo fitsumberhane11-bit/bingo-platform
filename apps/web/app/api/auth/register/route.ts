@@ -17,7 +17,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   const user = await registerUser(input, { ipAddress: ip, userAgent: getUserAgent(req) });
 
   return jsonOk(
-    { user, message: "Account created. Check your email to verify your account before depositing or playing." },
+    { user, message: "Account created! You can start playing with your DEMO balance right away." },
     { status: 201 },
   );
 });

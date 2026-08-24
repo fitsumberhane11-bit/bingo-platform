@@ -100,10 +100,17 @@ jobs:
       - name: Database integrity check
         run: pnpm db:integrity-check
 
-      - name: Production build (also enforces the real-money env gate)
+      # Builds with the platform's actual deployment shape: an optimized
+      # NODE_ENV=production build that still runs in DEMO/test-money mode
+      # (PAYMENTS_LIVE_MODE=false). The real-money env gate itself — that
+      # PAYMENTS_LIVE_MODE=true refuses to boot with mock payments or
+      # GAME_MONEY_MODE!=REAL — is unit-tested directly in lib/env.test.ts,
+      # not exercised via a second full build here.
+      - name: Production build (DEMO mode)
         run: pnpm build
         env:
           NODE_ENV: production
-          ENABLE_MOCK_PAYMENTS: "false"
-          GAME_MONEY_MODE: REAL
+          ENABLE_MOCK_PAYMENTS: "true"
+          PAYMENTS_LIVE_MODE: "false"
+          GAME_MONEY_MODE: TEST
           APP_URL: https://ci-build-placeholder.invalid

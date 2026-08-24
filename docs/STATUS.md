@@ -464,9 +464,13 @@ is public in source control by design (dev convenience only).
   `globalThis`, so it survives Next.js's per-route dev bundling — see
   Phase 4 notes above). This is correct for a single dev server or test
   run but is **not** a production pattern; it doesn't need to be, since
-  mock payments are hard-disabled outside development (`ENABLE_MOCK_
-  PAYMENTS=false` in production, additionally enforced by `getEnv()`
-  refusing to boot with it enabled when `NODE_ENV=production`).
+  mock payments are hard-disabled the moment real money goes live —
+  `getEnv()` refuses to boot with `ENABLE_MOCK_PAYMENTS=true` (or
+  `GAME_MONEY_MODE` other than `REAL`) whenever `PAYMENTS_LIVE_MODE=true`.
+  This is deliberately *not* keyed on `NODE_ENV=production`, since an
+  optimized production build is also how this DEMO platform itself gets
+  deployed while intentionally staying in test-money mode — see the
+  2026-08-24 fix noted in `docs/PRODUCTION_READINESS.md`.
 - See `docs/PRODUCTION_READINESS.md` for the full pre-launch checklist —
   legal, secrets, infrastructure, and data-integrity items that are
   explicitly not yet satisfied.

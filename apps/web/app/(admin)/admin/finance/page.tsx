@@ -81,7 +81,7 @@ export default async function AdminFinancePage() {
 function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="card">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className={`mt-1 text-lg font-bold ${accent ? "text-brand-700" : "text-ink-900"}`}>{value}</p>
     </div>
   );
