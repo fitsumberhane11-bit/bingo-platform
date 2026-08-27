@@ -118,7 +118,7 @@ function PageLink({
     <Link
       href={`/transactions?${params.toString()}`}
       aria-current={active ? "page" : undefined}
-      className={`rounded-lg px-3 py-1.5 font-medium ${active ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+      className={`rounded-lg px-3 py-1.5 font-medium ${active ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50 dark:bg-ink-800"}`}
     >
       {page}
     </Link>

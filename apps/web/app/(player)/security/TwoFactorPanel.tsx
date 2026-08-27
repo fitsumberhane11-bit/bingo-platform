@@ -95,7 +95,7 @@ export function TwoFactorPanel() {
           </p>
           <div className="grid grid-cols-2 gap-1.5 font-mono text-sm text-ink-900">
             {recoveryCodes.map((c) => (
-              <span key={c} className="rounded bg-white px-2 py-1 text-center">
+              <span key={c} className="rounded bg-white px-2 py-1 text-center dark:bg-ink-800">
                 {c}
               </span>
             ))}

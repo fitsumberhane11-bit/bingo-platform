@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   Gamepad2,
   Ticket,
-  History,
   Wallet,
   ArrowDownToLine,
   Receipt,
@@ -29,7 +28,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, enabled: true, primary: true },
   { href: "/play", label: "Play Bingo", icon: Gamepad2, enabled: true, primary: true },
   { href: "/tickets", label: "My Tickets", icon: Ticket, enabled: false },
-  { href: "/games/history", label: "My Games", icon: History, enabled: true },
+  // Game history is reachable from the right-side menu (RightMenu.tsx)
+  // instead of the primary nav, so it doesn't compete for space with the
+  // pages a player uses every session.
   { href: "/wallet", label: "Wallet", icon: Wallet, enabled: true },
   { href: "/wallet/withdraw", label: "Withdraw", icon: ArrowDownToLine, enabled: true },
   { href: "/transactions", label: "Transactions", icon: Receipt, enabled: true },

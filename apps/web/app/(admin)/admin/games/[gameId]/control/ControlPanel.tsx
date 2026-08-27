@@ -9,6 +9,13 @@ import { Alert } from "@/components/ui/Alert";
 
 type Card = { B: number[]; I: number[]; N: (number | null)[]; G: number[]; O: number[] };
 const LETTERS = ["B", "I", "N", "G", "O"] as const;
+const LETTER_TEXT_COLORS: Record<string, string> = {
+  B: "text-brand-600",
+  I: "text-blue-600",
+  N: "text-purple-600",
+  G: "text-gold-600",
+  O: "text-red-600",
+};
 
 function formatMilitaryTime(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -794,7 +801,7 @@ function MiniCardGrid({ cardNumbers, calledSet }: { cardNumbers: Card; calledSet
   return (
     <div className="mx-auto mb-3 grid max-w-[220px] grid-cols-5 gap-1">
       {LETTERS.map((letter) => (
-        <div key={letter} className="pb-0.5 text-center text-[10px] font-black text-brand-600">
+        <div key={letter} className={clsx("pb-0.5 text-center text-[10px] font-black", LETTER_TEXT_COLORS[letter])}>
           {letter}
         </div>
       ))}
@@ -808,7 +815,7 @@ function MiniCardGrid({ cardNumbers, calledSet }: { cardNumbers: Card; calledSet
               key={`${letter}-${row}`}
               className={clsx(
                 "flex aspect-square items-center justify-center rounded text-[11px] font-bold",
-                isFree ? "bg-gold-500 text-ink-900" : isCalled ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200",
+                isFree ? "bg-gold-500 text-ink-900" : isCalled ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200 dark:bg-ink-800",
               )}
             >
               {isFree ? "FREE" : value}

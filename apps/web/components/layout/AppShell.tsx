@@ -5,6 +5,7 @@ import { TestMoneyBanner } from "./TestMoneyBanner";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { SessionKeepAlive } from "./SessionKeepAlive";
 import { HeaderWalletBalance } from "./HeaderWalletBalance";
+import { RightMenu } from "./RightMenu";
 import { GlobalAnnouncementBanner } from "@/components/live/GlobalAnnouncementBanner";
 
 interface AppShellProps {
@@ -21,7 +22,7 @@ export async function AppShell({ children, user, walletBalance }: AppShellProps)
       <MaintenanceBanner />
       <div className="lg:flex">
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 flex-shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
+      <aside className="hidden w-64 flex-shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col dark:bg-ink-800">
         <div className="border-b border-slate-100 px-5 py-4">
           <BrandMark />
         </div>
@@ -33,7 +34,7 @@ export async function AppShell({ children, user, walletBalance }: AppShellProps)
 
       <div className="flex min-h-screen flex-1 flex-col">
         {/* Topbar */}
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:px-6 lg:justify-end">
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:px-6 lg:justify-end dark:bg-ink-800/90">
           <div className="lg:hidden">
             <BrandMark size="sm" />
           </div>
@@ -43,6 +44,7 @@ export async function AppShell({ children, user, walletBalance }: AppShellProps)
               <p className="text-sm font-semibold text-ink-900">{user.fullName}</p>
               <p className="text-xs text-slate-500">@{user.username}</p>
             </div>
+            <RightMenu />
           </div>
         </header>
 

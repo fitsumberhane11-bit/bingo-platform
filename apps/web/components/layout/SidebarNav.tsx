@@ -20,7 +20,7 @@ export function BottomNav() {
   const pathname = usePathname();
   const items = NAV_ITEMS.filter((i) => i.primary || ["/wallet/deposit", "/tickets", "/profile"].includes(i.href)).slice(0, 5);
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-10 flex justify-around border-t border-slate-200 bg-white py-1.5 lg:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-10 flex justify-around border-t border-slate-200 bg-white py-1.5 lg:hidden dark:bg-ink-800">
       {items.map((item) => (
         <MobileNavLink key={item.href} item={item} active={pathname?.startsWith(item.href) ?? false} />
       ))}

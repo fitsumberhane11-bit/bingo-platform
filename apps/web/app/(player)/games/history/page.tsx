@@ -105,7 +105,7 @@ export default async function GameHistoryPage({ searchParams }: { searchParams: 
             <Link
               key={p}
               href={`/games/history?${new URLSearchParams({ ...Object.fromEntries(filterQuery), page: String(p) }).toString()}`}
-              className={`rounded-lg px-3 py-1.5 font-medium ${p === page ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              className={`rounded-lg px-3 py-1.5 font-medium ${p === page ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50 dark:bg-ink-800"}`}
             >
               {p}
             </Link>

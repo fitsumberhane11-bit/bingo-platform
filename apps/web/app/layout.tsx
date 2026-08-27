@@ -19,9 +19,16 @@ export const viewport: Viewport = {
   themeColor: "#158757",
 };
 
+// Runs before paint so a returning player who chose dark mode never sees a
+// flash of the light theme while React hydrates.
+const THEME_INIT_SCRIPT = `try{if(localStorage.getItem('bingo-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-screen font-sans">{children}</body>
     </html>
   );

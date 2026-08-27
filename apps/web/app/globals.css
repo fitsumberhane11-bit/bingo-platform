@@ -4,6 +4,37 @@
 
 :root {
   color-scheme: light;
+  /* Default (light) slate scale — same hex values as Tailwind's built-in
+     slate palette, just expressed as "R G B" triplets so tailwind.config.ts
+     can read them through rgb(var(--x) / <alpha-value>). */
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+}
+
+.dark {
+  color-scheme: dark;
+  /* Same 11-step scale, shades swapped end-for-end (50<->900, 100<->800, …)
+     so a "very light background" utility becomes a "very dark background"
+     and a "near-black text" utility becomes "near-white text", while every
+     existing className stays exactly as written. */
+  --slate-50: 15 23 42;
+  --slate-100: 30 41 59;
+  --slate-200: 51 65 85;
+  --slate-300: 71 85 105;
+  --slate-400: 100 116 139;
+  --slate-500: 148 163 184;
+  --slate-600: 203 213 225;
+  --slate-700: 226 232 240;
+  --slate-800: 241 245 249;
+  --slate-900: 248 250 252;
 }
 
 html {
@@ -11,7 +42,23 @@ html {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-slate-50 text-slate-900 antialiased transition-colors duration-150;
+}
+
+/* `ink` (the app's near-black brand color) is used both as TEXT — where it
+   should flip to near-white in dark mode like the slate scale above — and
+   as an intentionally-always-dark SURFACE (e.g. the countdown banner, the
+   admin header), which must stay dark in both themes. Since those two roles
+   share one Tailwind color token, the flip is scoped to the text utility
+   classes only, leaving every `bg-ink-*` / `ring-ink-*` usage untouched. */
+.dark .text-ink-900 {
+  color: rgb(241 245 249);
+}
+.dark .text-ink-800 {
+  color: rgb(226 232 240);
+}
+.dark .text-ink-700 {
+  color: rgb(203 213 225);
 }
 
 @layer components {
@@ -22,7 +69,7 @@ body {
     @apply btn bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline-brand-600 shadow-sm;
   }
   .btn-secondary {
-    @apply btn bg-white text-ink-900 border border-slate-200 hover:bg-slate-50 focus-visible:outline-brand-600;
+    @apply btn bg-white text-ink-900 border border-slate-200 hover:bg-slate-50 focus-visible:outline-brand-600 dark:bg-ink-800;
   }
   .btn-ghost {
     @apply btn bg-transparent text-slate-600 hover:bg-slate-100;
@@ -31,13 +78,13 @@ body {
     @apply btn bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600;
   }
   .input {
-    @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:bg-ink-800;
   }
   .label {
     @apply mb-1.5 block text-sm font-medium text-slate-700;
   }
   .card {
-    @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-card;
+    @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-card dark:bg-ink-800;
   }
   .field-error {
     @apply mt-1 text-xs font-medium text-red-600;

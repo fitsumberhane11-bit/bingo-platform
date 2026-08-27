@@ -108,6 +108,13 @@ const LETTER_COLORS: Record<string, string> = {
   G: "bg-gold-500",
   O: "bg-red-600",
 };
+const LETTER_TEXT_COLORS: Record<string, string> = {
+  B: "text-brand-600",
+  I: "text-blue-600",
+  N: "text-purple-600",
+  G: "text-gold-600",
+  O: "text-red-600",
+};
 
 export function GameRoom({
   gameId,
@@ -647,7 +654,7 @@ function ReadOnlyCardGrid({ cardNumbers, calledSet }: { cardNumbers: Card; calle
   return (
     <div className="mx-auto grid max-w-xs grid-cols-5 gap-1">
       {LETTERS.map((letter) => (
-        <div key={letter} className="pb-1 text-center text-sm font-black text-brand-600">
+        <div key={letter} className={clsx("pb-1 text-center text-sm font-black", LETTER_TEXT_COLORS[letter])}>
           {letter}
         </div>
       ))}
@@ -661,7 +668,7 @@ function ReadOnlyCardGrid({ cardNumbers, calledSet }: { cardNumbers: Card; calle
               key={`${letter}-${row}`}
               className={clsx(
                 "flex aspect-square items-center justify-center rounded-lg text-sm font-bold sm:text-base",
-                isFree ? "bg-gold-500 text-ink-900" : isCalled ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200",
+                isFree ? "bg-gold-500 text-ink-900" : isCalled ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200 dark:bg-ink-800",
               )}
             >
               {isFree ? "FREE" : value}
@@ -853,7 +860,7 @@ function WinnerRow({ winner: w, calledSet }: { winner: WinnerEntry; calledSet: S
         </span>
       </button>
       {expanded && w.cardNumbers && (
-        <div className="border-t border-slate-200 bg-white p-3">
+        <div className="border-t border-slate-200 bg-white p-3 dark:bg-ink-800">
           <ReadOnlyCardGrid cardNumbers={w.cardNumbers} calledSet={calledSet} />
         </div>
       )}
@@ -889,7 +896,7 @@ function BingoBoard({ calledSet }: { calledSet: Set<number> }) {
           const [min] = RANGES[letter]!;
           return (
             <div key={letter} className="flex items-center gap-1">
-              <div className="w-4 shrink-0 text-center text-[10px] font-bold text-brand-600 sm:text-xs">{letter}</div>
+              <div className={clsx("w-4 shrink-0 text-center text-[10px] font-bold sm:text-xs", LETTER_TEXT_COLORS[letter])}>{letter}</div>
               <div className="grid flex-1 grid-cols-[repeat(15,minmax(0,1fr))] gap-0.5">
                 {Array.from({ length: 15 }, (_, i) => {
                   const n = min + i;
@@ -1004,7 +1011,7 @@ function PlayerCard({
       </div>
       <div className="grid grid-cols-5 gap-1">
         {LETTERS.map((letter) => (
-          <div key={letter} className="pb-1 text-center text-sm font-black text-brand-600">
+          <div key={letter} className={clsx("pb-1 text-center text-sm font-black", LETTER_TEXT_COLORS[letter])}>
             {letter}
           </div>
         ))}
@@ -1031,7 +1038,7 @@ function PlayerCard({
                   // be tapped, called or not (see `disabled` above) — marking
                   // one that was never called is the player's own mistake to
                   // make, not something the UI prevents.
-                  isFree ? "bg-gold-500 text-ink-900" : marked ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200",
+                  isFree ? "bg-gold-500 text-ink-900" : marked ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200 dark:bg-ink-800",
                   !isFree && !marked && "cursor-pointer",
                 )}
               >
