@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Users, Trophy, Clock, Percent } from "lucide-react";
 import { listLobbyGames, listRecentCompletedGames } from "@/lib/game/queries";
 import { formatETB, formatEthiopianDateTime, formatEthiopianDate } from "@/lib/format";
+import { LiveRefresh } from "@/components/live/LiveRefresh";
 
 export const metadata = { title: "Play Bingo" };
 
@@ -18,6 +19,7 @@ export default async function LobbyPage() {
 
   return (
     <div className="space-y-8">
+      <LiveRefresh events={["game:lobby-update"]} />
       <div>
         <h1 className="text-2xl font-bold text-ink-900">Play Bingo</h1>
         <p className="text-sm text-slate-500">Choose a game and grab your tickets.</p>
@@ -99,8 +101,14 @@ interface LobbyGame {
 
 function GameCard({ game: g }: { game: LobbyGame }) {
   const isLive = g.status === "LIVE" || g.status === "STARTING";
-  const registrationClosed = new Date() > new Date(g.registrationCloseAt);
-  const canBuyNow = (g.status === "OPEN" || g.status === "FULL") && !registrationClosed;
+  // Deliberately not gated on registrationCloseAt — see the comment on the
+  // matching check removed from lib/game/tickets.ts: that's a scheduling
+  // default from creation time, not a live signal, and treating it as a
+  // hard cutoff meant a game the operator had genuinely opened for tickets
+  // would silently flip to "View Game" hours later with nothing in the
+  // control panel showing anything had changed. `status` (which only ever
+  // changes via the operator's own explicit actions) is the real gate.
+  const canBuyNow = g.status === "OPEN" || g.status === "FULL";
   return (
     <div className="card flex flex-col">
       <div className="mb-2 flex items-center justify-between">
@@ -110,7 +118,7 @@ function GameCard({ game: g }: { game: LobbyGame }) {
           }`}
         >
           {isLive && <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />}
-          {registrationClosed && !isLive ? "Starting soon" : STATUS_LABEL[g.status] ?? g.status}
+          {STATUS_LABEL[g.status] ?? g.status}
         </span>
         <span className="flex items-center gap-1 text-xs text-slate-400" title="Winning pattern">
           {g.winningPattern.name}

@@ -26,7 +26,12 @@ const TRANSITIONS: Record<GameStatus, GameStatus[]> = {
   FULL: ["OPEN", "STARTING", "CANCELLED"],
   STARTING: ["LIVE", "CANCELLED"],
   LIVE: ["PAUSED", "COMPLETED", "CANCELLED"],
-  PAUSED: ["LIVE", "CANCELLED"],
+  // PAUSED -> COMPLETED: an operator pausing specifically to review and
+  // confirm a claim (calling stops, nothing else changes underneath them)
+  // is a normal, expected part of the confirm-winner flow, not a detour
+  // back through LIVE first — confirming a winner while paused must be
+  // able to end the game directly, the same as it can from LIVE.
+  PAUSED: ["LIVE", "COMPLETED", "CANCELLED"],
   COMPLETED: [],
   CANCELLED: [],
 };

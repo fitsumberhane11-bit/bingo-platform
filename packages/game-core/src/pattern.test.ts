@@ -124,6 +124,47 @@ describe("evaluatePattern — EXACT_MATCH shapes", () => {
   });
 });
 
+describe("evaluatePattern — ANY_OF_SET", () => {
+  it("Any Diagonal wins with just one diagonal, not requiring both", () => {
+    const pattern = findPreset("Any Diagonal");
+    const trBl = new Set([61, 47, 19, 5]); // O1, G17, I34, B5 — the TR-BL diagonal
+    expect(evaluatePattern(CARD, trBl, pattern).won).toBe(true);
+
+    const tlBr = new Set([1, 17, 49, 65]); // the other diagonal
+    expect(evaluatePattern(CARD, tlBr, pattern).won).toBe(true);
+  });
+
+  it("Any Diagonal does not win on an unrelated set of calls", () => {
+    const pattern = findPreset("Any Diagonal");
+    expect(evaluatePattern(CARD, new Set([1, 2, 3, 4]), pattern).won).toBe(false);
+  });
+});
+
+describe("evaluatePattern — COUNT_THRESHOLD", () => {
+  it("Early Five wins once 5 of the card's own numbers are called, in any position", () => {
+    const pattern = findPreset("Early Five");
+    const four = new Set([1, 16, 46, 61]);
+    expect(evaluatePattern(CARD, four, pattern).won).toBe(false);
+
+    const five = new Set([1, 16, 46, 61, 62]); // scattered, not a line or shape
+    expect(evaluatePattern(CARD, five, pattern).won).toBe(true);
+  });
+
+  it("Early Ten requires strictly more calls than Early Five", () => {
+    const five = findPreset("Early Five");
+    const ten = findPreset("Early Ten");
+    const nineCalled = new Set([1, 2, 3, 4, 16, 17, 18, 46, 47]);
+    expect(evaluatePattern(CARD, nineCalled, five).won).toBe(true);
+    expect(evaluatePattern(CARD, nineCalled, ten).won).toBe(false);
+  });
+
+  it("does not count numbers that are not on this card", () => {
+    const pattern = findPreset("Early Five");
+    const notOnCard = new Set([6, 7, 8, 9, 10]);
+    expect(evaluatePattern(CARD, notOnCard, pattern).won).toBe(false);
+  });
+});
+
 describe("all preset patterns are structurally valid", () => {
   it.each(PRESET_PATTERNS.map((p) => [p.name, p.definition] as const))("%s never throws when evaluated against an empty called set", (_name, definition) => {
     expect(() => evaluatePattern(CARD, new Set(), definition)).not.toThrow();

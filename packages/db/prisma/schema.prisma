@@ -112,6 +112,8 @@ enum PatternMatchType {
   EXACT_MATCH // matrix-driven: four corners, X, plus, diagonals, full house, custom shapes
   ANY_ROWS // any N distinct rows fully marked (horizontal line patterns)
   ANY_COLUMNS // any N distinct columns fully marked (vertical line patterns)
+  ANY_OF_SET // any N of a fixed candidate-matrix list fully marked (e.g. "any diagonal" = 2 candidates, require 1)
+  COUNT_THRESHOLD // N of the card's own numbers have been called, regardless of position (Early Five/Seven/Ten)
 }
 
 enum TicketStatus {
@@ -119,6 +121,28 @@ enum TicketStatus {
   WINNER
   VOID
   REFUNDED
+  DISQUALIFIED // false-Bingo penalty policy removed this card from further play in this game
+}
+
+// The system's own automatic check of a submitted BINGO claim against the
+// authoritative called-numbers + pattern — never influenced by client state.
+enum ClaimValidationStatus {
+  VALID
+  INVALID
+}
+
+// A VALID claim still needs an explicit operator action before it pays out —
+// mirrors a real bingo hall, where a caller verifies a card before confirming
+// a win. INVALID claims never reach this state; they're auto-resolved.
+enum ClaimConfirmationStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum WinningStageStatus {
+  ACTIVE // still accepting claims (winnerLimit not yet reached)
+  COMPLETED // winnerLimit reached — no further claims for this stage
 }
 
 enum PlatformLedgerType {
@@ -127,6 +151,15 @@ enum PlatformLedgerType {
   PRIZE_PAYOUT // debit at winner payout time, mirrors the WINNING_PAYOUT credit to the winner's wallet
   PRIZE_POOL_FORFEITED // all 75 numbers called with no winner — reserved pool converts to platform revenue (documented policy)
   REFUND // debit at ticket refund time (game cancelled pre-start), mirrors the REFUND credit to the player's wallet
+  // The platform's own working capital, independent of any single game's
+  // ticket sales — e.g. topping up the reserve so it can honor a FIXED
+  // prize rule that legitimately exceeds what one game's own sales fund
+  // (by design; see PrizeRuleType.FIXED). Unlike the other types, this is
+  // NOT expected to net to zero across a game's lifecycle and is never
+  // touched by per-game footprint reversal — it's counted directly in
+  // integrity.ts's platform-wide conservation formula instead (see
+  // checkPlatformConservation), the same way a user-wallet ADJUSTMENT is.
+  PLATFORM_ADJUSTMENT
 }
 
 enum PrizeRuleType {
@@ -179,6 +212,15 @@ enum GameEventType {
   CANCELLED
   PRIZE_DISTRIBUTED
   SEED_REVEALED
+  PRIZE_CONFIGURED // operator set/changed the authoritative prize amount
+  RULES_CONFIGURED // operator set the winning-stage(s) for this game
+  BINGO_CLAIM_SUBMITTED
+  BINGO_CLAIM_VALID
+  BINGO_CLAIM_INVALID
+  WINNER_CONFIRMED // operator confirmed a VALID claim — this is when the prize actually pays out
+  WINNER_CLAIM_REJECTED // operator rejected a VALID (system-checked) claim
+  CARD_DISQUALIFIED
+  PLAYER_REMOVED_FROM_GAME
 }
 
 // ----------------------------------------------------------------------------
@@ -224,6 +266,7 @@ model User {
   gamePlayers         GamePlayer[]
   gamesCreated        Game[]              @relation("GameCreatedBy")
   winners             Winner[]
+  bingoClaims         BingoClaim[]
   payments            Payment[]
   withdrawals         Withdrawal[]        @relation("WithdrawalUser")
   withdrawalsReviewed Withdrawal[]        @relation("WithdrawalReviewer")
@@ -565,8 +608,10 @@ model WinningPattern {
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
-  games   Game[]
-  winners Winner[]
+  games         Game[]
+  winners       Winner[]
+  winningStages WinningStage[]
+  claims        BingoClaim[]
 }
 
 model PrizeRule {
@@ -585,6 +630,12 @@ model PrizeRule {
 model Game {
   id          String     @id @default(uuid())
   name        String
+  // Short, human-typeable reference code (e.g. "7K4QXP") — distinct from
+  // the internal uuid, meant to be read aloud or written down: a player
+  // citing a winning claim, or anyone contacting support about a specific
+  // game, uses this instead of the id. Generated once at creation (see
+  // generateGameCode() in engine.ts) and never changes.
+  gameCode    String     @unique
   description String?
   status      GameStatus @default(DRAFT)
 
@@ -615,6 +666,24 @@ model Game {
   winningPattern   WinningPattern @relation(fields: [winningPatternId], references: [id])
   prizeRuleId      String
   prizeRule        PrizeRule      @relation(fields: [prizeRuleId], references: [id])
+
+  // Operator-authoritative prize amount (Section 2). When set, this is the
+  // ONE true prize for the game — never derived from ticket sales, never
+  // client-suppliable. Nullable so older/legacy games keep computing their
+  // pool from PrizeRule as before. Only editable while status is DRAFT,
+  // SCHEDULED, OPEN, or FULL — locked the instant the game goes LIVE.
+  // See lib/game/prize-authority.ts for the single read path every caller
+  // (lobby, room, control panel, payout) must use instead of re-deriving it.
+  operatorPrizeAmount Decimal? @db.Decimal(18, 2)
+
+  // Configurable false-Bingo policy (Section 16). Shape:
+  // { warnAt: 1, disqualifyCardAt: 2, removePlayerAt: 3 }
+  // Any threshold may be omitted to disable that escalation step. Defaults
+  // to this exact conservative policy at creation if not specified.
+  falseBingoPolicy Json?
+
+  winningStages WinningStage[]
+  claims        BingoClaim[]
 
   // Provably-fair commitment scheme
   seedCommitmentHash  String // SHA-256(secretSeed), published at game open
@@ -672,7 +741,15 @@ model BingoTicket {
   purchaseTransactionId String?
   createdAt             DateTime     @default(now())
 
+  // False-Bingo tracking (Section 16/17) — incremented only on a system-
+  // validated INVALID claim, read by the game's falseBingoPolicy to decide
+  // whether this card gets disqualified and/or the player removed.
+  falseClaimCount    Int       @default(0)
+  disqualifiedAt     DateTime?
+  disqualifiedReason String?
+
   winner                Winner?
+  claims                BingoClaim[]
   walletTransactions    WalletTransaction[]
   platformLedgerEntries PlatformLedgerEntry[]
 
@@ -704,6 +781,13 @@ model Winner {
   user                 User           @relation(fields: [userId], references: [id])
   winningPatternId     String
   winningPattern       WinningPattern @relation(fields: [winningPatternId], references: [id])
+  // Which configured stage this win belongs to, when the game uses the
+  // multi-stage WinningStage system (Section 6) rather than the legacy
+  // single-pattern-per-game path. Null for legacy games.
+  winningStageId       String?
+  winningStage         WinningStage?  @relation(fields: [winningStageId], references: [id])
+  claimId              String?        @unique
+  claim                BingoClaim?    @relation(fields: [claimId], references: [id])
   ballNumberAtWin      Int
   calledSequenceNumber Int // which call # (1-indexed) completed the pattern
   winningPositions     Json // [{row,col,letter,number}] — the exact cells that satisfied the pattern
@@ -713,6 +797,86 @@ model Winner {
   confirmedAt          DateTime       @default(now())
 
   @@index([gameId])
+  @@index([winningStageId])
+}
+
+// One configured prize tier for a game (Section 6) — e.g. "1st Prize: Four
+// Corners, ETB 100" then "Final Prize: Full House, ETB 250" in the same
+// game. A game with no rows here falls back to its legacy single
+// winningPatternId/prizeRule behavior (see prize-authority.ts and
+// claims.ts) — this keeps every pre-existing single-pattern game and test
+// working unchanged. `winnerLimit` is how many winners this specific stage
+// awards before it stops accepting claims; independent per stage, so
+// stages don't have to complete in order (a real player can complete
+// "Full House" before another completes "Four Corners" on a slower card).
+model WinningStage {
+  id          String             @id @default(uuid())
+  gameId      String
+  game        Game               @relation(fields: [gameId], references: [id])
+  order       Int // display order only (1st/2nd/Final) — does not gate claim eligibility
+  patternId   String
+  pattern     WinningPattern     @relation(fields: [patternId], references: [id])
+  label       String? // "1st Prize", "Final Prize" — optional, falls back to the pattern name
+  prizeAmount Decimal            @db.Decimal(18, 2)
+  winnerLimit Int                @default(1)
+  winnerCount Int                @default(0) // incremented atomically as claims are confirmed
+  status      WinningStageStatus @default(ACTIVE)
+  completedAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  claims  BingoClaim[]
+  winners Winner[]
+
+  @@unique([gameId, order])
+  @@index([gameId, status])
+}
+
+// A player-submitted "I have Bingo" claim for one specific card (Section
+// 13-21) — the core of turning winner detection from an automatic sweep
+// into a genuinely player-initiated action. The server independently
+// recomputes validationStatus from authoritative data (calledNumbers +
+// the card's actual numbers + the claimed pattern) every time; nothing
+// about VALID/INVALID is ever taken from the client. A VALID claim still
+// requires an explicit operator CONFIRMED action (see ClaimConfirmationStatus)
+// before a Winner row / payout is created — mirrors a real bingo hall
+// caller verifying a card before confirming a win.
+model BingoClaim {
+  id       String      @id @default(uuid())
+  gameId   String
+  game     Game        @relation(fields: [gameId], references: [id])
+  ticketId String
+  ticket   BingoTicket @relation(fields: [ticketId], references: [id])
+  userId   String
+  user     User        @relation(fields: [userId], references: [id])
+
+  // Null when the game uses the legacy single-pattern path — patternId is
+  // then just game.winningPatternId.
+  stageId   String?
+  stage     WinningStage?  @relation(fields: [stageId], references: [id])
+  patternId String
+  pattern   WinningPattern @relation(fields: [patternId], references: [id])
+
+  validationStatus   ClaimValidationStatus
+  invalidReason      String? // e.g. "Card has 22/24 required cells called — pattern not yet complete"
+  confirmationStatus ClaimConfirmationStatus @default(PENDING)
+  confirmedByUserId  String?
+  confirmedAt        DateTime?
+
+  // Captured at submission time — the moment the player noticed and claimed
+  // the win, not whenever an operator gets around to confirming it (which
+  // could be many calls later). This is what a Winner row's ballNumberAtWin/
+  // calledSequenceNumber are copied from on confirm.
+  ballNumberAtWin      Int?
+  calledSequenceNumber Int?
+
+  submittedAt DateTime @default(now())
+
+  winner Winner?
+
+  @@index([gameId, ticketId])
+  @@index([gameId, userId])
+  @@index([gameId, validationStatus])
 }
 
 // ----------------------------------------------------------------------------

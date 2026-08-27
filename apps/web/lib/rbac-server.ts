@@ -48,3 +48,15 @@ export function requireAnyRole(ctx: AccessContext, roles: string[]): void {
     throw new ForbiddenError("You do not have the required role for this action.");
   }
 }
+
+/**
+ * Where a freshly-logged-in user should land by default. Mirrors the gate
+ * in the (admin) layout: anyone with a role beyond plain PLAYER runs the
+ * admin/operator shell day to day, so that's their home — not the player
+ * dashboard, which is built around buying tickets and watching your own
+ * cards, not running a game floor.
+ */
+export function defaultLandingPath(ctx: AccessContext): string {
+  if (ctx.isSuperAdmin) return "/admin";
+  return ctx.roles.some((r) => r !== "PLAYER") ? "/admin" : "/dashboard";
+}

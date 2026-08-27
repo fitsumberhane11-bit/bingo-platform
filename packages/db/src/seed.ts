@@ -178,6 +178,8 @@ async function seedPlatformAccount() {
 
 async function seedWinningPatterns() {
   for (const preset of PRESET_PATTERNS) {
+    const { linesRequired, matrices, matchesRequired, count } = preset.definition;
+    const config = linesRequired || matrices || matchesRequired || count ? { linesRequired, matrices, matchesRequired, count } : undefined;
     await prisma.winningPattern.upsert({
       where: { name: preset.name },
       update: {},
@@ -186,7 +188,7 @@ async function seedWinningPatterns() {
         description: preset.description,
         matchType: preset.definition.matchType,
         matrix: preset.definition.matrix ?? undefined,
-        config: preset.definition.linesRequired ? { linesRequired: preset.definition.linesRequired } : undefined,
+        config,
         isSystem: true,
       },
     });

@@ -10,6 +10,7 @@ import { verifyTwoFactorCode } from "@/lib/two-factor-service";
 import { getClientIp, getUserAgent } from "@/lib/request";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { setAuthCookies } from "@/lib/cookies";
+import { defaultLandingPath, loadAccessContext } from "@/lib/rbac-server";
 
 export const runtime = "nodejs";
 
@@ -29,7 +30,8 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   if (!valid) throw new AuthError("Invalid verification code.");
 
   const result = await completeTwoFactorLogin(userId, { ipAddress: ip, userAgent: getUserAgent(req) });
-  const res = NextResponse.json(apiSuccess({ user: result.user }));
+  const landingPath = defaultLandingPath(await loadAccessContext(result.user.id));
+  const res = NextResponse.json(apiSuccess({ user: result.user, landingPath }));
   setAuthCookies(res, result.tokens);
   return res;
 });

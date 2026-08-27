@@ -30,11 +30,18 @@ export async function listLobbyGames() {
   const withPrizePool = games.map((g) => {
     const sales = salesMap.get(g.id);
     const ticketSalesTotal = sales?._sum.purchasePrice ?? new Prisma.Decimal(0);
-    const prizePool = calculatePrizePool(
-      g.prizeRule.config as { type: typeof g.prizeRule.type; winnerPercent?: number; fixedAmount?: number },
-      ticketSalesTotal,
-      g.jackpotAmount,
-    );
+    // Operator-authoritative prize (Section 2) takes priority over the
+    // sales-derived pool, matching resolveGamePrizePool()'s read order —
+    // computed inline here (rather than calling that shared helper) purely
+    // to avoid one extra DB round-trip per lobby game; the override rule
+    // itself must stay identical to the room/control-panel read path.
+    const prizePool =
+      g.operatorPrizeAmount ??
+      calculatePrizePool(
+        g.prizeRule.config as { type: typeof g.prizeRule.type; winnerPercent?: number; fixedAmount?: number },
+        ticketSalesTotal,
+        g.jackpotAmount,
+      );
     return {
       ...g,
       ticketsSold: sales?._count ?? 0,

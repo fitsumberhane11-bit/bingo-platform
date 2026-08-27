@@ -72,9 +72,18 @@ export async function purchaseTickets(input: { gameId: string; userId: string; t
       );
     }
 
+    // Deliberately no `now > game.registrationCloseAt` check here: that
+    // timestamp is a scheduling default an operator sets once at creation
+    // and easily forgets about, and enforcing it as a hard cutoff meant a
+    // game an operator had genuinely opened for tickets would silently
+    // stop selling hours later with no visible change in the control
+    // panel (still shows "OPEN") — the game's actual `status` (set by the
+    // operator's own explicit actions: open/start/pause/cancel) is the
+    // real, intentional gate. `registrationOpenAt` is kept as a real gate
+    // since "not yet open" only ever resolves forward in time and can't
+    // go silently stale the way a closing deadline can.
     const now = new Date();
     if (now < game.registrationOpenAt) throw new ConflictError("Registration has not opened yet for this game.");
-    if (now > game.registrationCloseAt) throw new ConflictError("Registration has closed for this game.");
 
     const currentTicketCount = existingPlayer?.ticketCount ?? 0;
     if (currentTicketCount + input.ticketCount > game.maxTicketsPerPlayer) {

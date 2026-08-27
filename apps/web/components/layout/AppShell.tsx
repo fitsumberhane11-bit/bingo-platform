@@ -5,6 +5,7 @@ import { TestMoneyBanner } from "./TestMoneyBanner";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { SessionKeepAlive } from "./SessionKeepAlive";
 import { HeaderWalletBalance } from "./HeaderWalletBalance";
+import { GlobalAnnouncementBanner } from "@/components/live/GlobalAnnouncementBanner";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -44,6 +45,8 @@ export async function AppShell({ children, user, walletBalance }: AppShellProps)
             </div>
           </div>
         </header>
+
+        <GlobalAnnouncementBanner />
 
         <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 lg:pb-8">{children}</main>
       </div>

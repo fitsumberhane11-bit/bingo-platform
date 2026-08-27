@@ -47,14 +47,26 @@ const createGameSchema = z
     registrationCloseAt: z.coerce.date(),
     ticketPrice: z.coerce.number().positive(),
     maxPlayers: z.coerce.number().int().min(2).max(100000),
-    maxTicketsPerPlayer: z.coerce.number().int().min(1).max(100).default(5),
+    maxTicketsPerPlayer: z.coerce.number().int().min(1).max(100000).default(5),
     minPlayers: z.coerce.number().int().min(1).default(2),
     jackpotAmount: z.coerce.number().min(0).default(0),
-    callIntervalSeconds: z.coerce.number().int().min(3).max(120).default(8),
+    // Floor raised from 3 to 5 (players juggling several cards at once
+    // reported the calling as "very fast" even at the old 3s minimum);
+    // default raised to match so an operator who doesn't touch this field
+    // gets a comfortable pace out of the box.
+    callIntervalSeconds: z.coerce.number().int().min(5).max(120).default(10),
     callMode: z.enum(["AUTO", "MANUAL"]).default("AUTO"),
     manualMarkEnabled: z.boolean().default(false),
     winningPatternId: z.string().uuid(),
     prizeRuleId: z.string().uuid(),
+    operatorPrizeAmount: z.coerce.number().positive().optional(),
+    falseBingoPolicy: z
+      .object({
+        warnAt: z.number().int().min(1).optional(),
+        disqualifyCardAt: z.number().int().min(1).optional(),
+        removePlayerAt: z.number().int().min(1).optional(),
+      })
+      .optional(),
   })
   .refine((d) => d.minPlayers <= d.maxPlayers, { message: "minPlayers cannot exceed maxPlayers", path: ["minPlayers"] })
   .refine((d) => d.registrationOpenAt < d.registrationCloseAt, {

@@ -3,23 +3,50 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
-import { Trophy, Users, Wallet, ShieldCheck, Megaphone, Ticket as TicketIcon, Volume2, VolumeX, Vibrate, Wifi, WifiOff } from "lucide-react";
+import { Trophy, Users, Wallet, ShieldCheck, Megaphone, Ticket as TicketIcon, Volume2, VolumeX, Vibrate, Wifi, WifiOff, Plus, X, Ban, ChevronDown } from "lucide-react";
 import { apiGet, apiPost, ApiClientError } from "@/lib/api-client";
 import { Alert } from "@/components/ui/Alert";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 import { playSound, unlockAudio, vibrate, getSoundSettings, setSoundSettings, subscribeSoundSettings, type SoundSettings } from "@/lib/sound";
 
 type Card = { B: number[]; I: number[]; N: (number | null)[]; G: number[]; O: number[] };
-type Ticket = { id: string; ticketNumber: number; cardNumbers: Card; status: string };
+type Ticket = {
+  id: string;
+  ticketNumber: number;
+  cardNumbers: Card;
+  status: string;
+  disqualifiedReason: string | null;
+  hasPendingClaim: boolean;
+};
 type CalledNumber = { ballNumber: number; letter: string; sequenceNumber: number };
 type Announcement = { id: string; type: string; message: string; createdAt: string; expiresAt: string | null };
-type WinnerEntry = { ticketId: string; ticketNumber: number; username: string; prizeAmount: string; ballNumberAtWin: number; isMine: boolean };
+type WinnerEntry = {
+  ticketId: string;
+  ticketNumber: number;
+  cardNumbers: Card | null;
+  username: string;
+  prizeAmount: string;
+  ballNumberAtWin: number;
+  isMine: boolean;
+};
+type VerifyClaim = { ticketId: string; ticketNumber: number; username: string; pattern: string; cardNumbers: Card };
+type WinningStage = {
+  id: string;
+  order: number;
+  label: string;
+  patternName: string;
+  prizeAmount: string;
+  winnerLimit: number;
+  winnerCount: number;
+  status: "ACTIVE" | "COMPLETED";
+};
 
 export interface GameSnapshot {
   serverTimestamp: string;
   game: {
     id: string;
     name: string;
+    gameCode: string;
     status: string;
     registrationCloseAt: string;
     ticketPrice: string;
@@ -37,14 +64,50 @@ export interface GameSnapshot {
   remainingCount: number;
   playerCount: number;
   ticketCount: number;
+  disqualifiedCardCount: number;
   prizePool: string;
+  winningStages: WinningStage[];
   announcements: Announcement[];
   winners: WinnerEntry[];
   playerTickets: Ticket[];
+  pendingVerification: VerifyClaim | null;
 }
+
+function formatMilitaryTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+      {children}
+    </span>
+  );
+}
+
+const GAME_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "Draft",
+  SCHEDULED: "Scheduled",
+  OPEN: "Open",
+  FULL: "Full",
+  STARTING: "Starting",
+  LIVE: "Playing",
+  PAUSED: "Paused",
+  COMPLETED: "Ended",
+  CANCELLED: "Cancelled",
+};
 
 const LETTERS = ["B", "I", "N", "G", "O"] as const;
 const RANGES: Record<string, [number, number]> = { B: [1, 15], I: [16, 30], N: [31, 45], G: [46, 60], O: [61, 75] };
+const LETTER_COLORS: Record<string, string> = {
+  B: "bg-brand-600",
+  I: "bg-blue-600",
+  N: "bg-purple-600",
+  G: "bg-gold-500",
+  O: "bg-red-600",
+};
 
 export function GameRoom({
   gameId,
@@ -56,15 +119,15 @@ export function GameRoom({
   isAuthenticated: boolean;
 }) {
   const [status, setStatus] = useState(initialSnapshot.game.status);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [calledNumbers, setCalledNumbers] = useState<CalledNumber[]>(initialSnapshot.calledNumbers);
   const [playerCount, setPlayerCount] = useState(initialSnapshot.playerCount);
   const [ticketCount, setTicketCount] = useState(initialSnapshot.ticketCount);
+  const [disqualifiedCardCount, setDisqualifiedCardCount] = useState(initialSnapshot.disqualifiedCardCount);
   const [prizePool, setPrizePool] = useState(initialSnapshot.prizePool);
+  const [winningStages, setWinningStages] = useState<WinningStage[]>(initialSnapshot.winningStages);
   const [tickets, setTickets] = useState(initialSnapshot.playerTickets);
   const [announcements, setAnnouncements] = useState<Announcement[]>(initialSnapshot.announcements);
   const [winners, setWinners] = useState<WinnerEntry[]>(initialSnapshot.winners);
-  const [activeTicketIdx, setActiveTicketIdx] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [winnerBanner, setWinnerBanner] = useState<{
     ticketNumber: number;
@@ -76,19 +139,19 @@ export function GameRoom({
   const [buying, setBuying] = useState(false);
   const [buyCount, setBuyCount] = useState(1);
   const [buyError, setBuyError] = useState<string | null>(null);
+  const [showAddCard, setShowAddCard] = useState(false);
   const [connectionState, setConnectionState] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const [walletBalance, setWalletBalance] = useState<string | null>(null);
   const [soundSettings, setSoundSettingsState] = useState<SoundSettings>(() => getSoundSettings());
+  const [claimFeedback, setClaimFeedback] = useState<Record<string, { status: "submitting" | "pending" | "invalid"; message: string }>>({});
+  const [verifyClaim, setVerifyClaim] = useState<VerifyClaim | null>(initialSnapshot.pendingVerification);
+  const [nowClock, setNowClock] = useState(() => new Date());
 
   useEffect(() => subscribeSoundSettings(setSoundSettingsState), []);
 
   useEffect(() => {
-    // Registration can lapse (registrationCloseAt passing) without any SSE
-    // event firing, since it isn't a game-status transition — poll the
-    // clock so the buy panel doesn't keep offering tickets the server has
-    // already stopped accepting.
-    const interval = setInterval(() => setNowMs(Date.now()), 15_000);
-    return () => clearInterval(interval);
+    const clock = setInterval(() => setNowClock(new Date()), 1000);
+    return () => clearInterval(clock);
   }, []);
 
   async function refreshWallet() {
@@ -110,6 +173,37 @@ export function GameRoom({
   const currentNumber = calledNumbers[calledNumbers.length - 1];
   const myTicketIds = useRef(new Set(initialSnapshot.playerTickets.map((t) => t.id)));
 
+  // Marks on an actually-called number are shared across every card the
+  // player holds in this game — a number is either called or it isn't, so
+  // dabbing it once should tick it off on every card that carries it
+  // (Section: multi-card marking). Marks on a number that ISN'T called
+  // (allowed deliberately — see PlayerCard's toggleDab) stay per-card:
+  // that's the player's own mistake on that one specific card, not a fact
+  // about the number, so it must not "correct" or affect their other cards.
+  const calledDabStorageKey = `bingo-dabbed:${gameId}`;
+  const [calledDabs, setCalledDabs] = useState<Set<number>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = window.localStorage.getItem(calledDabStorageKey);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  function toggleCalledDab(value: number) {
+    setCalledDabs((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      try {
+        window.localStorage.setItem(calledDabStorageKey, JSON.stringify([...next]));
+      } catch {
+        /* localStorage unavailable (private browsing, quota) — marks just won't survive a reload */
+      }
+      return next;
+    });
+  }
+
   useEffect(() => {
     const es = new EventSource(`/api/games/${gameId}/stream`);
 
@@ -128,8 +222,11 @@ export function GameRoom({
       setPlayerCount(data.playerCount);
       setTicketCount(data.ticketCount);
       setPrizePool(data.prizePool);
+      setWinningStages(data.winningStages);
+      setDisqualifiedCardCount(data.disqualifiedCardCount);
       setAnnouncements(data.announcements);
       setWinners(data.winners);
+      setVerifyClaim(data.pendingVerification);
       if (data.playerTickets.length > 0) {
         setTickets(data.playerTickets);
         for (const t of data.playerTickets) myTicketIds.current.add(t.id);
@@ -165,9 +262,41 @@ export function GameRoom({
       setAnnouncements((prev) => [data, ...prev].slice(0, 20));
       playSound("announcement");
     });
+    es.addEventListener("game:claim", (e) => {
+      const data = JSON.parse(e.data);
+      // Visible to EVERY player in the room, not just the claimant — lets
+      // anyone cross-check the claimed card against the called numbers
+      // themselves while the operator reviews it manually (transparency).
+      if (data.result === "PENDING_REVIEW" && data.cardNumbers) {
+        setVerifyClaim({ ticketId: data.ticketId, ticketNumber: data.ticketNumber, username: data.username ?? "", pattern: data.pattern, cardNumbers: data.cardNumbers });
+      } else if (data.result === "REJECTED") {
+        setVerifyClaim((prev) => (prev?.ticketId === data.ticketId ? null : prev));
+      }
+      if (!myTicketIds.current.has(data.ticketId)) return;
+      if (data.result === "PENDING_REVIEW") {
+        setTickets((prev) => prev.map((t) => (t.id === data.ticketId ? { ...t, hasPendingClaim: true } : t)));
+        setClaimFeedback((prev) => ({ ...prev, [data.ticketId]: { status: "pending", message: "Bingo submitted — waiting for the operator to confirm." } }));
+      } else if (data.result === "INVALID") {
+        setClaimFeedback((prev) => ({ ...prev, [data.ticketId]: { status: "invalid", message: "Not a Bingo — this card doesn't satisfy the pattern yet." } }));
+        playSound("error");
+      } else if (data.result === "REJECTED") {
+        setTickets((prev) => prev.map((t) => (t.id === data.ticketId ? { ...t, hasPendingClaim: false } : t)));
+        setClaimFeedback((prev) => ({ ...prev, [data.ticketId]: { status: "invalid", message: data.reason ?? "Claim was not confirmed." } }));
+      }
+    });
+    es.addEventListener("game:card-disqualified", (e) => {
+      const data = JSON.parse(e.data);
+      // This game-wide count is for every player in the room, not just the
+      // one whose card it was — false-Bingo enforcement is visible to all,
+      // same as the accompanying announcement.
+      setDisqualifiedCardCount((prev) => prev + 1);
+      if (!myTicketIds.current.has(data.ticketId)) return;
+      setTickets((prev) => prev.map((t) => (t.id === data.ticketId ? { ...t, status: "DISQUALIFIED" } : t)));
+    });
     es.addEventListener("game:winner", (e) => {
       const data = JSON.parse(e.data);
       const mine = myTicketIds.current.has(data.ticketId);
+      setVerifyClaim((prev) => (prev?.ticketId === data.ticketId ? null : prev));
       setWinnerBanner({
         ticketNumber: data.ticketNumber,
         username: data.username ?? "",
@@ -180,12 +309,20 @@ export function GameRoom({
         {
           ticketId: data.ticketId,
           ticketNumber: data.ticketNumber,
+          cardNumbers: data.cardNumbers ?? null,
           username: data.username ?? "",
           prizeAmount: data.prizeAmount,
           ballNumberAtWin: 0, // not shown in the results UI — the live game:winner event doesn't carry it
           isMine: mine,
         },
       ]);
+      if (mine) {
+        setTickets((prev) => prev.map((t) => (t.id === data.ticketId ? { ...t, status: "WINNER", hasPendingClaim: false } : t)));
+        setClaimFeedback((prev) => ({ ...prev, [data.ticketId]: { status: "pending", message: "Confirmed! 🎉" } }));
+      }
+      if (typeof data.stageId === "string") {
+        setWinningStages((prev) => prev.map((s) => (s.id === data.stageId ? { ...s, winnerCount: s.winnerCount + 1 } : s)));
+      }
       playSound("winner");
       if (mine) {
         vibrate([80, 40, 80, 40, 160]);
@@ -212,10 +349,11 @@ export function GameRoom({
     setBuyError(null);
     try {
       const res = await apiPost<{ tickets: Ticket[] }>("/api/tickets/purchase", { gameId, ticketCount: buyCount });
-      setTickets((prev) => [...prev, ...res.tickets]);
+      setTickets((prev) => [...prev, ...res.tickets.map((t) => ({ ...t, disqualifiedReason: null, hasPendingClaim: false }))]);
       for (const t of res.tickets) myTicketIds.current.add(t.id);
       playSound("ticketPurchase");
       refreshWallet();
+      setShowAddCard(false);
     } catch (err) {
       setBuyError(err instanceof ApiClientError ? err.message : "Purchase failed.");
       playSound("error");
@@ -224,33 +362,76 @@ export function GameRoom({
     }
   }
 
-  const registrationClosed = nowMs > new Date(initialSnapshot.game.registrationCloseAt).getTime();
-  const canBuy = (status === "OPEN" || status === "FULL") && !registrationClosed;
-  const activeTicket = tickets[activeTicketIdx];
+  async function handleClaim(ticketId: string, stageId?: string) {
+    unlockAudio();
+    setClaimFeedback((prev) => ({ ...prev, [ticketId]: { status: "submitting", message: "Checking your card…" } }));
+    try {
+      const res = await apiPost<{ won: boolean; invalidReason?: string; penalty: string }>(`/api/games/${gameId}/claim`, { ticketId, stageId });
+      if (res.won) {
+        setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, hasPendingClaim: true } : t)));
+        setClaimFeedback((prev) => ({ ...prev, [ticketId]: { status: "pending", message: "Bingo submitted — waiting for the operator to confirm." } }));
+      } else {
+        setClaimFeedback((prev) => ({ ...prev, [ticketId]: { status: "invalid", message: res.invalidReason ?? "Not a Bingo yet." } }));
+        if (res.penalty === "CARD_DISQUALIFIED") setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, status: "DISQUALIFIED" } : t)));
+        playSound("error");
+      }
+    } catch (err) {
+      setClaimFeedback((prev) => ({ ...prev, [ticketId]: { status: "invalid", message: err instanceof ApiClientError ? err.message : "Could not submit claim." } }));
+    }
+  }
+
+  const canBuy = status === "OPEN" || status === "FULL";
   const activeAnnouncements = announcements.filter((a) => !a.expiresAt || new Date(a.expiresAt) > new Date());
+  const canClaim = status === "LIVE" || status === "PAUSED";
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 pb-6">
+    <div className="mx-auto max-w-6xl space-y-4 pb-24">
       {/* Header */}
-      <div className="card flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="card flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold text-ink-900">{initialSnapshot.game.name}</h1>
-          <p className="text-xs text-slate-500">
-            {initialSnapshot.game.winningPattern.name} · {initialSnapshot.game.callMode === "AUTO" ? "Auto-calling" : "Operator-controlled calling"}
-            {initialSnapshot.game.manualMarkEnabled ? " · Manual mark" : " · Auto mark"}
-          </p>
+
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <LabeledField label="Game Code">
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono font-semibold tracking-wide text-ink-700" title="Game code — use this as a reference for winner claims and support">
+                {initialSnapshot.game.gameCode}
+              </span>
+            </LabeledField>
+            <LabeledField label="Time">
+              <span className="font-mono text-slate-700">{formatMilitaryTime(nowClock)}</span>
+            </LabeledField>
+            <LabeledField label="Status">
+              <StatusPill status={status} />
+            </LabeledField>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <LabeledField label="Price">
+              <span className="text-ink-800">ETB {initialSnapshot.game.ticketPrice} / card</span>
+            </LabeledField>
+            <LabeledField label="Number of Game">
+              <span className="text-ink-800">{winningStages.length > 0 ? winningStages.length : 1}</span>
+            </LabeledField>
+            <LabeledField label="Prize">
+              <span className="flex items-center gap-1 font-semibold text-gold-600">
+                <Trophy className="h-3.5 w-3.5" /> ETB {prizePool}
+              </span>
+            </LabeledField>
+          </div>
+
+          <div className="mt-3 text-xs">
+            <LabeledField label="Game Type">
+              <span className="text-ink-800">{initialSnapshot.game.winningPattern.name}</span>
+            </LabeledField>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <StatusPill status={status} />
           <ConnectionIndicator state={connectionState} />
           <span className="flex items-center gap-1 text-slate-500" title="Players in this game">
             <Users className="h-4 w-4" /> {playerCount}/{initialSnapshot.game.maxPlayers}
           </span>
           <span className="flex items-center gap-1 text-slate-500" title="Tickets sold">
             <TicketIcon className="h-4 w-4" /> {ticketCount}
-          </span>
-          <span className="flex items-center gap-1 font-semibold text-gold-600">
-            <Trophy className="h-4 w-4" /> ETB {prizePool}
           </span>
           {isAuthenticated && (
             <Link href="/wallet" className="flex items-center gap-1 font-semibold text-brand-700" title="Your wallet balance">
@@ -260,6 +441,10 @@ export function GameRoom({
           <SoundQuickToggle settings={soundSettings} />
         </div>
       </div>
+
+      {winningStages.length > 0 && <WinningRules stages={winningStages} />}
+
+      {verifyClaim && <VerifyClaimPanel claim={verifyClaim} calledSet={calledSet} isMine={myTicketIds.current.has(verifyClaim.ticketId)} />}
 
       {activeAnnouncements.length > 0 && (
         <div className="space-y-2">
@@ -285,63 +470,65 @@ export function GameRoom({
         </div>
       )}
 
+      {/* Takes over the spot the "starting in Ns" countdown/announcement
+          occupied — once the game has actually started, that slot shows
+          live call progress instead of going blank. */}
+      {countdown === null && (status === "LIVE" || status === "PAUSED") && (
+        <div className="card flex items-center justify-center gap-1.5 py-2.5 text-sm text-slate-600">
+          <span className="font-mono text-base font-bold text-ink-900">{calledNumbers.length}</span> of 75 balls called
+        </div>
+      )}
+
       {winnerBanner && (
         <div className={clsx("card text-center", winnerBanner.mine ? "bg-gold-500 text-ink-900" : "bg-brand-50")}>
           <p className="text-lg font-extrabold">🎉 BINGO! 🎉</p>
           <p className="text-sm">
-            {winnerBanner.mine
-              ? "You won!"
-              : winnerBanner.username
-                ? `${winnerBanner.username} won`
-                : `Ticket #${winnerBanner.ticketNumber} won`}{" "}
-            — ETB {winnerBanner.prizeAmount}
+            {winnerBanner.username || `Card #${winnerBanner.ticketNumber}`} won on Card #{winnerBanner.ticketNumber}
+            {winnerBanner.mine && <span className="font-semibold"> (You!)</span>} — ETB {winnerBanner.prizeAmount}
             {winnerBanner.winnerCount > 1 && ` (split ${winnerBanner.winnerCount} ways)`}
           </p>
         </div>
       )}
 
-      {status === "COMPLETED" && <ResultsScreen gameId={gameId} winners={winners} prizePool={prizePool} calledCount={calledNumbers.length} />}
+      {status === "COMPLETED" && (
+        <ResultsScreen gameId={gameId} winners={winners} prizePool={prizePool} calledCount={calledNumbers.length} calledSet={calledSet} />
+      )}
 
-      {/* Current number */}
-      <div className="card flex flex-col items-center justify-center py-8">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Current number</p>
-        {currentNumber ? (
-          <div key={currentNumber.sequenceNumber} className="animate-ball-pop text-center">
-            <p className="text-2xl font-black text-brand-600">{currentNumber.letter}</p>
-            <p className="font-mono text-7xl font-black text-ink-900">{currentNumber.ballNumber}</p>
-          </div>
-        ) : (
-          <p className="text-lg text-slate-300">Waiting for the game to start…</p>
-        )}
-        <p className="mt-3 text-xs text-slate-400">{calledNumbers.length} of 75 called</p>
-      </div>
+      {/* Rolling Bingo balls */}
+      <RollingBalls calledNumbers={calledNumbers} />
 
       {/* Called history */}
       <div className="card">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recent calls</p>
-        <div className="flex flex-wrap gap-1.5">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Called number history</p>
+        <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1">
           {[...calledNumbers]
-            .slice(-15)
+            .slice(-20)
             .reverse()
             .map((c) => (
-              <span key={c.sequenceNumber} className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-ink-900">
+              <span key={c.sequenceNumber} className="shrink-0 rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-ink-900">
                 {c.letter}-{c.ballNumber}
               </span>
             ))}
           {calledNumbers.length === 0 && <span className="text-xs text-slate-300">No numbers called yet.</span>}
         </div>
+        {disqualifiedCardCount > 0 && (
+          <p className="mt-2 flex items-center gap-1 text-xs font-medium text-red-600">
+            <Ban className="h-3.5 w-3.5" />
+            {disqualifiedCardCount} card{disqualifiedCardCount === 1 ? "" : "s"} blocked for false Bingo
+          </p>
+        )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <BingoBoard calledSet={calledSet} />
+      <BingoBoard calledSet={calledSet} />
 
-        <div className="card">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">My card</p>
-          {tickets.length === 0 ? (
+      {/* My cards */}
+      <div>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">My cards</p>
+        {tickets.length === 0 ? (
+          <div className="card">
             <BuyTicketPanel
               canBuy={canBuy}
               status={status}
-              registrationClosed={registrationClosed}
               isAuthenticated={isAuthenticated}
               ticketPrice={initialSnapshot.game.ticketPrice}
               maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer}
@@ -351,53 +538,24 @@ export function GameRoom({
               buyError={buyError}
               onBuy={handleBuyTickets}
             />
-          ) : (
-            <div>
-              {tickets.length > 1 && (
-                <div className="mb-3 flex flex-wrap gap-1.5">
-                  {tickets.map((t, i) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setActiveTicketIdx(i)}
-                      className={clsx(
-                        "rounded-lg px-2.5 py-1 text-xs font-semibold",
-                        i === activeTicketIdx ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600",
-                      )}
-                    >
-                      Ticket {t.ticketNumber}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {activeTicket && (
-                <PlayerCard
-                  key={activeTicket.id}
-                  ticketId={activeTicket.id}
-                  card={activeTicket.cardNumbers}
-                  calledSet={calledSet}
-                  won={activeTicket.status === "WINNER"}
-                  manualMark={initialSnapshot.game.manualMarkEnabled}
-                />
-              )}
-              {canBuy && tickets.length < initialSnapshot.game.maxTicketsPerPlayer && (
-                <BuyTicketPanel
-                  canBuy={canBuy}
-                  status={status}
-                  registrationClosed={registrationClosed}
-                  isAuthenticated={isAuthenticated}
-                  ticketPrice={initialSnapshot.game.ticketPrice}
-                  maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer - tickets.length}
-                  buyCount={buyCount}
-                  setBuyCount={setBuyCount}
-                  buying={buying}
-                  buyError={buyError}
-                  onBuy={handleBuyTickets}
-                  compact
-                />
-              )}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {tickets.map((t) => (
+              <PlayerCard
+                key={t.id}
+                ticket={t}
+                calledSet={calledSet}
+                calledDabs={calledDabs}
+                onToggleCalledDab={toggleCalledDab}
+                canClaim={canClaim}
+                stages={winningStages}
+                feedback={claimFeedback[t.id]}
+                onClaim={(stageId) => handleClaim(t.id, stageId)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {status !== "COMPLETED" && (
@@ -407,6 +565,169 @@ export function GameRoom({
         >
           <ShieldCheck className="h-3.5 w-3.5" /> Verify this game is provably fair
         </Link>
+      )}
+
+      {/* Floating "+" Add Card button (Section 7) */}
+      {canBuy && (tickets.length === 0 || tickets.length < initialSnapshot.game.maxTicketsPerPlayer) && isAuthenticated && (
+        <div className="fixed bottom-5 right-5 z-20">
+          {showAddCard && (
+            <div className="card mb-3 w-72 shadow-lg">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Add cards</p>
+                <button type="button" onClick={() => setShowAddCard(false)} aria-label="Close" className="text-slate-400 hover:text-slate-600">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <BuyTicketPanel
+                canBuy={canBuy}
+                status={status}
+                  isAuthenticated={isAuthenticated}
+                ticketPrice={initialSnapshot.game.ticketPrice}
+                maxTicketsPerPlayer={initialSnapshot.game.maxTicketsPerPlayer - tickets.length}
+                buyCount={buyCount}
+                setBuyCount={setBuyCount}
+                buying={buying}
+                buyError={buyError}
+                onBuy={handleBuyTickets}
+                compact
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAddCard((v) => !v)}
+            aria-label="Add card"
+            aria-expanded={showAddCard}
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition-transform hover:scale-105 hover:bg-brand-700"
+          >
+            <Plus className="h-7 w-7" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WinningRules({ stages }: { stages: WinningStage[] }) {
+  const medals = ["🥇", "🥈", "🥉"];
+  return (
+    <div className="card">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Winning rules</p>
+      <ul className="space-y-1.5 text-sm">
+        {stages.map((s, i) => (
+          <li key={s.id} className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-ink-800">
+              <span>{medals[i] ?? "🏆"}</span>
+              <span className="font-semibold">{s.label}</span>
+              <span className="text-slate-400">— {s.patternName}</span>
+              {s.status === "COMPLETED" && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">WON</span>}
+            </span>
+            <span className="font-mono font-bold text-gold-600">ETB {s.prizeAmount}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Broadcasts the claimed card to every player in the room the moment
+// someone submits a BINGO — visible to all, not just the claimant — so
+// anyone can visually cross-check it against the called numbers while the
+// operator reviews it manually (transparency). Unlike PlayerCard, this is
+// read-only and auto-marks called cells directly: the whole point here is
+// showing the objective truth of the card at a glance, not testing
+// whether the viewer can spot it themselves.
+// Read-only, auto-marked (every called cell is already highlighted, nothing
+// for the viewer to tap) — used anywhere a card is shown for someone OTHER
+// than its owner to check against the called numbers themselves: a
+// pending-claim review (VerifyClaimPanel) or a settled winner's card
+// (ResultsScreen's expandable rows). Unlike PlayerCard, this never affects
+// or reads gameplay state — it's purely a transparency display.
+function ReadOnlyCardGrid({ cardNumbers, calledSet }: { cardNumbers: Card; calledSet: Set<number> }) {
+  return (
+    <div className="mx-auto grid max-w-xs grid-cols-5 gap-1">
+      {LETTERS.map((letter) => (
+        <div key={letter} className="pb-1 text-center text-sm font-black text-brand-600">
+          {letter}
+        </div>
+      ))}
+      {Array.from({ length: 5 }, (_, row) =>
+        LETTERS.map((letter) => {
+          const value = cardNumbers[letter][row] ?? null;
+          const isFree = value === null;
+          const isCalled = !isFree && calledSet.has(value);
+          return (
+            <div
+              key={`${letter}-${row}`}
+              className={clsx(
+                "flex aspect-square items-center justify-center rounded-lg text-sm font-bold sm:text-base",
+                isFree ? "bg-gold-500 text-ink-900" : isCalled ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200",
+              )}
+            >
+              {isFree ? "FREE" : value}
+            </div>
+          );
+        }),
+      )}
+    </div>
+  );
+}
+
+function VerifyClaimPanel({ claim, calledSet, isMine }: { claim: VerifyClaim; calledSet: Set<number>; isMine: boolean }) {
+  return (
+    <div className="card border-2 border-gold-400 bg-gold-50/40">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gold-700">🔍 Verifying a BINGO claim — check it yourself</p>
+      </div>
+      <p className="mb-1 text-sm text-ink-800">
+        <span className="font-semibold">{claim.username}</span> claims Card #{claim.ticketNumber} — {claim.pattern}. The operator is reviewing it now;
+        every called number is already marked below so you can confirm it yourself.
+      </p>
+      {!isMine && (
+        <p className="mb-2 inline-block rounded-lg bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">
+          Not one of your registered cards
+        </p>
+      )}
+      <ReadOnlyCardGrid cardNumbers={claim.cardNumbers} calledSet={calledSet} />
+    </div>
+  );
+}
+
+function RollingBalls({ calledNumbers }: { calledNumbers: CalledNumber[] }) {
+  const current = calledNumbers[calledNumbers.length - 1];
+  const recent = [...calledNumbers].slice(-12).reverse();
+
+  return (
+    <div className="card">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">Bingo balls</p>
+      <div className="mb-4 flex flex-col items-center justify-center">
+        {current ? (
+          <div key={current.sequenceNumber} className="motion-safe:animate-ball-pop text-center">
+            <p className="text-2xl font-black text-brand-600">{current.letter}</p>
+            <p className="font-mono text-7xl font-black text-ink-900">{current.ballNumber}</p>
+          </div>
+        ) : (
+          <p className="py-6 text-lg text-slate-300">Waiting for the game to start…</p>
+        )}
+        <p className="mt-2 text-xs text-slate-400">{calledNumbers.length} of 75 called</p>
+      </div>
+
+      {recent.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Recently called balls, most recent first">
+          {recent.map((c, i) => (
+            <div
+              key={c.sequenceNumber}
+              className={clsx(
+                "flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-full font-mono text-white shadow-sm motion-safe:animate-roll-in",
+                LETTER_COLORS[c.letter] ?? "bg-slate-500",
+                i === 0 && "ring-2 ring-offset-2 ring-ink-900",
+              )}
+            >
+              <span className="text-[9px] font-bold leading-none">{c.letter}</span>
+              <span className="text-sm font-black leading-none">{c.ballNumber}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -461,7 +782,19 @@ function SoundQuickToggle({ settings }: { settings: SoundSettings }) {
   );
 }
 
-function ResultsScreen({ gameId, winners, prizePool, calledCount }: { gameId: string; winners: WinnerEntry[]; prizePool: string; calledCount: number }) {
+function ResultsScreen({
+  gameId,
+  winners,
+  prizePool,
+  calledCount,
+  calledSet,
+}: {
+  gameId: string;
+  winners: WinnerEntry[];
+  prizePool: string;
+  calledCount: number;
+  calledSet: Set<number>;
+}) {
   return (
     <div className="card space-y-4 border-2 border-gold-300 bg-gradient-to-b from-gold-50 to-white text-center">
       <div>
@@ -474,20 +807,9 @@ function ResultsScreen({ gameId, winners, prizePool, calledCount }: { gameId: st
       {winners.length > 0 ? (
         <div className="mx-auto max-w-sm space-y-2 text-left">
           <p className="text-center text-xs font-semibold uppercase tracking-wide text-slate-500">Winners</p>
+          <p className="text-center text-[11px] text-slate-400">Tap a winner to check their card against the called numbers yourself.</p>
           {winners.map((w) => (
-            <div
-              key={w.ticketId}
-              className={clsx(
-                "flex items-center justify-between rounded-lg px-3 py-2 text-sm",
-                w.isMine ? "bg-gold-100 font-semibold text-ink-900" : "bg-slate-50 text-slate-700",
-              )}
-            >
-              <span>
-                {w.isMine ? "You" : `Ticket #${w.ticketNumber}`}
-                {w.username && !w.isMine ? ` (${w.username})` : ""}
-              </span>
-              <span className="font-mono">ETB {w.prizeAmount}</span>
-            </div>
+            <WinnerRow key={w.ticketId} winner={w} calledSet={calledSet} />
           ))}
         </div>
       ) : (
@@ -506,6 +828,39 @@ function ResultsScreen({ gameId, winners, prizePool, calledCount }: { gameId: st
   );
 }
 
+// One winner, collapsed to a single summary line by default; tapping it
+// (the down arrow) expands the full card, every called cell already
+// marked, so anyone — not just the winner — can check the win for
+// themselves instead of taking the "confirmed" outcome on faith.
+function WinnerRow({ winner: w, calledSet }: { winner: WinnerEntry; calledSet: Set<number> }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={clsx("rounded-lg text-sm", w.isMine ? "bg-gold-100 font-semibold text-ink-900" : "bg-slate-50 text-slate-700")}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        disabled={!w.cardNumbers}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left disabled:cursor-default"
+      >
+        <span>
+          {w.username} — Card #{w.ticketNumber}
+          {w.isMine && <span className="ml-1 text-xs text-gold-600">(You)</span>}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono">ETB {w.prizeAmount}</span>
+          {w.cardNumbers && <ChevronDown className={clsx("h-4 w-4 shrink-0 text-slate-400 transition-transform", expanded && "rotate-180")} />}
+        </span>
+      </button>
+      {expanded && w.cardNumbers && (
+        <div className="border-t border-slate-200 bg-white p-3">
+          <ReadOnlyCardGrid cardNumbers={w.cardNumbers} calledSet={calledSet} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {
     LIVE: "bg-red-50 text-red-600",
@@ -517,82 +872,107 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", styles[status] ?? "bg-slate-100 text-slate-600")}>
       {status === "LIVE" && <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />}
-      {status}
+      {GAME_STATUS_LABEL[status] ?? status}
     </span>
   );
 }
 
+// One row per letter (B/I/N/G/O) with its 15 numbers running across,
+// instead of the old 15-row/5-column layout — same information, but wide
+// and short like the Bingo Balls box above it instead of towering over it.
 function BingoBoard({ calledSet }: { calledSet: Set<number> }) {
   return (
     <div className="card">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Bingo board</p>
-      <div className="grid grid-cols-5 gap-1">
-        {LETTERS.map((letter) => (
-          <div key={letter} className="pb-1 text-center text-xs font-bold text-brand-600">
-            {letter}
-          </div>
-        ))}
-        {Array.from({ length: 15 }, (_, row) =>
-          LETTERS.map((letter) => {
-            const [min] = RANGES[letter]!;
-            const n = min + row;
-            const called = calledSet.has(n);
-            return (
-              <div
-                key={`${letter}${n}`}
-                className={clsx(
-                  "flex aspect-square items-center justify-center rounded text-[10px] font-semibold transition-colors sm:text-xs",
-                  called ? "bg-brand-600 text-white" : "bg-slate-50 text-slate-400",
-                )}
-              >
-                {n}
+      <div className="space-y-1">
+        {LETTERS.map((letter) => {
+          const [min] = RANGES[letter]!;
+          return (
+            <div key={letter} className="flex items-center gap-1">
+              <div className="w-4 shrink-0 text-center text-[10px] font-bold text-brand-600 sm:text-xs">{letter}</div>
+              <div className="grid flex-1 grid-cols-[repeat(15,minmax(0,1fr))] gap-0.5">
+                {Array.from({ length: 15 }, (_, i) => {
+                  const n = min + i;
+                  const called = calledSet.has(n);
+                  return (
+                    <div
+                      key={n}
+                      className={clsx(
+                        "flex aspect-square items-center justify-center rounded text-[8px] font-semibold transition-colors sm:text-[10px]",
+                        called ? "bg-brand-600 text-white" : "bg-slate-50 text-slate-400",
+                      )}
+                    >
+                      {n}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          }),
-        )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 function PlayerCard({
-  ticketId,
-  card,
+  ticket,
   calledSet,
-  won,
-  manualMark,
+  calledDabs,
+  onToggleCalledDab,
+  canClaim,
+  stages,
+  feedback,
+  onClaim,
 }: {
-  ticketId: string;
-  card: Card;
+  ticket: Ticket;
   calledSet: Set<number>;
-  won: boolean;
-  manualMark: boolean;
+  calledDabs: Set<number>;
+  onToggleCalledDab: (value: number) => void;
+  canClaim: boolean;
+  stages: WinningStage[];
+  feedback?: { status: "submitting" | "pending" | "invalid"; message: string };
+  onClaim: (stageId?: string) => void;
 }) {
-  // Purely a UI affordance — the server determines winners from calledNumbers
-  // directly and never looks at this set. Manual mode just means the player
-  // has to tap a called number to "dab" it, mimicking a physical card.
-  // Persisted to localStorage per ticket so a refresh or reconnect (a real
-  // scenario, not an edge case — a dropped connection, a phone locking,
-  // switching apps) doesn't wipe out marks the player already made.
-  const dabStorageKey = `bingo-dabbed:${ticketId}`;
-  const [dabbed, setDabbed] = useState<Set<number>>(() => {
+  const card = ticket.cardNumbers;
+  const won = ticket.status === "WINNER";
+  const disqualified = ticket.status === "DISQUALIFIED";
+
+  // The player can tap ANY number on the card, not just ones that were
+  // actually called — the server never auto-marks a cell on the player's
+  // behalf (Section 11/28), and it never trusts this state either: winner
+  // detection always reads calledNumbers directly against a submitted
+  // claim, never this display-only marking. Marking a number that wasn't
+  // called is allowed on purpose (it's the player's own mistake to make —
+  // it can lead them to claim BINGO on a card that doesn't actually
+  // qualify, which is exactly the realism being asked for) but it stays
+  // local to THIS card only, unlike a genuinely-called mark (see
+  // `calledDabs` on the parent, shared across every card the player
+  // holds). Persisted to localStorage per ticket so a refresh or reconnect
+  // doesn't wipe out marks the player already made.
+  const mistakeDabStorageKey = `bingo-mistake-dabbed:${ticket.id}`;
+  const [mistakeDabbed, setMistakeDabbed] = useState<Set<number>>(() => {
     if (typeof window === "undefined") return new Set();
     try {
-      const raw = window.localStorage.getItem(dabStorageKey);
+      const raw = window.localStorage.getItem(mistakeDabStorageKey);
       return raw ? new Set(JSON.parse(raw)) : new Set();
     } catch {
       return new Set();
     }
   });
+  const [stagePicker, setStagePicker] = useState(false);
 
   function toggleDab(value: number) {
-    if (!manualMark || !calledSet.has(value)) return;
-    setDabbed((prev) => {
+    if (calledSet.has(value)) {
+      onToggleCalledDab(value);
+      return;
+    }
+    setMistakeDabbed((prev) => {
       const next = new Set(prev);
       if (next.has(value)) next.delete(value);
       else next.add(value);
       try {
-        window.localStorage.setItem(dabStorageKey, JSON.stringify([...next]));
+        window.localStorage.setItem(mistakeDabStorageKey, JSON.stringify([...next]));
       } catch {
         /* localStorage unavailable (private browsing, quota) — marks just won't survive a reload */
       }
@@ -600,11 +980,28 @@ function PlayerCard({
     });
   }
 
+  const activeStages = stages.filter((s) => s.status === "ACTIVE");
+  const claimDisabled = !canClaim || won || disqualified || ticket.hasPendingClaim || feedback?.status === "submitting";
+
+  function handleBingoClick() {
+    if (activeStages.length > 1) {
+      setStagePicker(true);
+      return;
+    }
+    onClaim(activeStages[0]?.id);
+  }
+
   return (
-    <div className={clsx("rounded-xl border-2 p-2", won ? "border-gold-500" : "border-slate-200")}>
-      {manualMark && (
-        <p className="mb-2 text-center text-[11px] font-medium text-slate-400">Manual mark — tap a called number to dab it</p>
+    <div
+      className={clsx(
+        "rounded-xl border-2 p-2",
+        won ? "border-gold-500" : disqualified ? "border-slate-300 opacity-60" : "border-slate-200",
       )}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11px] font-medium text-slate-400">Ticket #{ticket.ticketNumber} — tap a number to mark it (be careful — marking one that wasn&apos;t called is your own mistake)</p>
+        {disqualified && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">Disqualified</span>}
+      </div>
       <div className="grid grid-cols-5 gap-1">
         {LETTERS.map((letter) => (
           <div key={letter} className="pb-1 text-center text-sm font-black text-brand-600">
@@ -616,25 +1013,26 @@ function PlayerCard({
             const value = card[letter][row] ?? null;
             const isFree = value === null;
             const isCalled = !isFree && calledSet.has(value);
-            const marked = isFree || (manualMark ? !isFree && dabbed.has(value) : isCalled);
+            const marked = isFree || (!isFree && (isCalled ? calledDabs.has(value) : mistakeDabbed.has(value)));
             return (
               <button
                 key={`${letter}-${row}`}
                 type="button"
-                disabled={isFree || !manualMark || !isCalled}
+                disabled={isFree}
                 onClick={() => value !== null && toggleDab(value)}
                 aria-pressed={marked}
-                aria-label={isFree ? "Free space" : `${letter}-${value}${marked ? ", marked" : isCalled ? ", called, not yet marked" : ""}`}
+                aria-label={isFree ? "Free space" : `${letter}-${value}${marked ? ", marked" : ", not marked"}`}
                 className={clsx(
                   "flex aspect-square items-center justify-center rounded-lg text-sm font-bold sm:text-base",
-                  isFree
-                    ? "bg-gold-500 text-ink-900"
-                    : marked
-                      ? "bg-brand-600 text-white"
-                      : isCalled
-                        ? "bg-white text-ink-900 ring-2 ring-brand-400"
-                        : "bg-white text-ink-900 ring-1 ring-slate-200",
-                  manualMark && isCalled && !marked && "cursor-pointer",
+                  // Deliberately no visual difference between "called, not yet
+                  // dabbed" and "not called at all" — the player has to find
+                  // their own matches against the called-numbers list rather
+                  // than have the system point them out. Any number can now
+                  // be tapped, called or not (see `disabled` above) — marking
+                  // one that was never called is the player's own mistake to
+                  // make, not something the UI prevents.
+                  isFree ? "bg-gold-500 text-ink-900" : marked ? "bg-brand-600 text-white" : "bg-white text-ink-900 ring-1 ring-slate-200",
+                  !isFree && !marked && "cursor-pointer",
                 )}
               >
                 {isFree ? "FREE" : value}
@@ -643,7 +1041,56 @@ function PlayerCard({
           }),
         )}
       </div>
+
       {won && <p className="mt-2 text-center text-sm font-bold text-gold-600">🏆 Winning ticket!</p>}
+      {disqualified && ticket.disqualifiedReason && <p className="mt-2 text-center text-xs text-slate-400">{ticket.disqualifiedReason}</p>}
+
+      {feedback && (
+        <p
+          className={clsx(
+            "mt-2 rounded-lg px-2 py-1.5 text-center text-xs font-medium",
+            feedback.status === "invalid" ? "bg-red-50 text-red-700" : "bg-brand-50 text-brand-800",
+          )}
+        >
+          {feedback.status === "invalid" ? "❌ " : ""}
+          {feedback.message}
+        </p>
+      )}
+
+      {!won && !disqualified && canClaim && (
+        <div className="mt-3">
+          {stagePicker ? (
+            <div className="space-y-1.5">
+              <p className="text-center text-[11px] text-slate-400">Which prize are you claiming?</p>
+              {activeStages.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    setStagePicker(false);
+                    onClaim(s.id);
+                  }}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                >
+                  {s.label} — {s.patternName}
+                </button>
+              ))}
+              <button type="button" onClick={() => setStagePicker(false)} className="w-full text-center text-xs text-slate-400 hover:text-slate-600">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBingoClick}
+              disabled={claimDisabled}
+              className="w-full rounded-xl bg-gold-500 py-2.5 text-sm font-black uppercase tracking-wide text-ink-900 transition-transform hover:scale-[1.01] hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+            >
+              {ticket.hasPendingClaim ? "Awaiting confirmation…" : "BINGO!"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -651,19 +1098,17 @@ function PlayerCard({
 const NOT_YET_OPEN_STATUSES = new Set(["DRAFT", "SCHEDULED"]);
 const ALREADY_STARTED_STATUSES = new Set(["STARTING", "LIVE", "PAUSED"]);
 
-function ticketSalesMessage(status: string, registrationClosed: boolean): string {
+function ticketSalesMessage(status: string): string {
   if (NOT_YET_OPEN_STATUSES.has(status)) return "Ticket sales haven't opened for this game yet — check back soon.";
   if (ALREADY_STARTED_STATUSES.has(status)) return "This game has already started, so ticket sales are closed.";
   if (status === "CANCELLED") return "This game was cancelled.";
   if (status === "COMPLETED") return "This game has ended.";
-  if (registrationClosed) return "Ticket sales have closed for this game — it's about to start.";
   return "Ticket sales are closed for this game.";
 }
 
 function BuyTicketPanel({
   canBuy,
   status,
-  registrationClosed,
   isAuthenticated,
   ticketPrice,
   maxTicketsPerPlayer,
@@ -676,7 +1121,6 @@ function BuyTicketPanel({
 }: {
   canBuy: boolean;
   status: string;
-  registrationClosed: boolean;
   isAuthenticated: boolean;
   ticketPrice: string;
   maxTicketsPerPlayer: number;
@@ -700,12 +1144,12 @@ function BuyTicketPanel({
   if (!canBuy) {
     return (
       <p className={compact ? "mt-3 text-xs text-slate-400" : "py-6 text-center text-sm text-slate-400"}>
-        {ticketSalesMessage(status, registrationClosed)}
+        {ticketSalesMessage(status)}
       </p>
     );
   }
   return (
-    <div className={compact ? "mt-4 border-t border-slate-100 pt-4" : ""}>
+    <div className={compact ? "" : ""}>
       {buyError && (
         <div className="mb-2">
           <Alert variant="error">{buyError}</Alert>
@@ -719,7 +1163,7 @@ function BuyTicketPanel({
       <div className="mb-3">
         <span className="mb-1.5 block text-sm text-slate-600">Quantity</span>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Ticket quantity">
-          {[1, 2, 3, 5, 10].filter((n) => n <= maxTicketsPerPlayer).map((n) => (
+          {[1, 2, 3, 5, 10, 20].filter((n) => n <= maxTicketsPerPlayer).map((n) => (
             <button
               key={n}
               type="button"
@@ -744,19 +1188,24 @@ function BuyTicketPanel({
             className="input w-20"
           />
         </div>
-        <p className="mt-1 text-xs text-slate-400">Up to {maxTicketsPerPlayer} tickets per player.</p>
+        <p className="mt-1 text-xs text-slate-400">
+          {maxTicketsPerPlayer > 50 ? "Add as many cards as you'd like." : `Up to ${maxTicketsPerPlayer} more card${maxTicketsPerPlayer === 1 ? "" : "s"} allowed.`}
+        </p>
       </div>
 
       <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm">
         <span className="text-slate-500">
-          {buyCount} ticket{buyCount > 1 ? "s" : ""} × ETB {ticketPrice}
+          {buyCount} card{buyCount > 1 ? "s" : ""} × ETB {ticketPrice}
         </span>
         <span className="font-bold text-ink-900">ETB {(Number(ticketPrice) * buyCount).toFixed(2)}</span>
       </div>
 
       <SubmitButton onClick={onBuy} loading={buying} className="w-full">
-        Buy {buyCount} ticket{buyCount > 1 ? "s" : ""}
+        Register {buyCount} card{buyCount > 1 ? "s" : ""} — pay ETB {(Number(ticketPrice) * buyCount).toFixed(2)}
       </SubmitButton>
+      <p className="mt-1.5 text-center text-[11px] text-slate-400">
+        Registering deducts the cost from your wallet immediately — cards aren&apos;t yours to play until payment goes through.
+      </p>
     </div>
   );
 }

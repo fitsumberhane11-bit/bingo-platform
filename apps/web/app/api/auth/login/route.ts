@@ -7,6 +7,7 @@ import { loginUser } from "@/lib/auth-service";
 import { getClientIp, getUserAgent } from "@/lib/request";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { setAuthCookies } from "@/lib/cookies";
+import { defaultLandingPath, loadAccessContext } from "@/lib/rbac-server";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,8 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     return NextResponse.json(apiSuccess({ twoFactorRequired: true, challengeToken: result.challengeToken }));
   }
 
-  const res = NextResponse.json(apiSuccess({ user: result.user }));
+  const landingPath = defaultLandingPath(await loadAccessContext(result.user.id));
+  const res = NextResponse.json(apiSuccess({ user: result.user, landingPath }));
   setAuthCookies(res, result.tokens);
   return res;
 });

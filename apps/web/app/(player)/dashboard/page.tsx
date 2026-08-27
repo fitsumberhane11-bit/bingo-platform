@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Wallet, Trophy, Gamepad2, Bell, Ticket, Radio, CalendarClock, Megaphone } from "lucide-react";
+import { Wallet, Trophy, Gamepad2, Bell, Ticket, Radio, CalendarClock } from "lucide-react";
 import { prisma } from "@bingo/db";
 import { getCurrentUser } from "@/lib/current-user";
 import { Alert } from "@/components/ui/Alert";
+import { LiveRefresh } from "@/components/live/LiveRefresh";
 
 export const metadata = { title: "Dashboard" };
 
@@ -14,7 +15,7 @@ export default async function DashboardPage() {
   if (!current) redirect("/login");
   const userId = current.sub;
 
-  const [user, recentNotifications, recentTransactions, liveGamesCount, upcomingGames, myTicketsCount, winningsAgg, recentGames, announcements] =
+  const [user, recentNotifications, recentTransactions, liveGamesCount, upcomingGames, myTicketsCount, winningsAgg, recentGames] =
     await Promise.all([
       prisma.user.findUniqueOrThrow({
         where: { id: userId },
@@ -41,19 +42,11 @@ export default async function DashboardPage() {
         take: 4,
         include: { game: { select: { id: true, name: true, status: true, startTime: true } } },
       }),
-      prisma.announcement.findMany({
-        where: {
-          active: true,
-          OR: [{ targetType: "ALL" }, { targetType: "USER", targetUserId: userId }],
-          AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
-        },
-        orderBy: { createdAt: "desc" },
-        take: 3,
-      }),
     ]);
 
   return (
     <div className="space-y-6">
+      <LiveRefresh events={["game:lobby-update"]} />
       <div>
         <h1 className="text-2xl font-bold text-ink-900">Welcome back, {user.fullName.split(" ")[0]}</h1>
         <p className="text-sm text-slate-500">Here&apos;s what&apos;s happening with your account.</p>
@@ -64,19 +57,6 @@ export default async function DashboardPage() {
           Verify your email to secure your account for later. You&apos;re all set to play with DEMO balance right
           now — verification isn&apos;t required in this test version.
         </Alert>
-      )}
-
-      {announcements.length > 0 && (
-        <div className="space-y-2">
-          {announcements.map((a) => (
-            <Alert key={a.id} variant={a.type === "WARNING" || a.type === "IMPORTANT" ? "error" : "info"}>
-              <span className="inline-flex items-center gap-1.5 font-semibold">
-                <Megaphone className="h-3.5 w-3.5" /> Announcement
-              </span>
-              <span className="ml-1">{a.message}</span>
-            </Alert>
-          ))}
-        </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -37,12 +37,12 @@ function LoginForm() {
     };
 
     try {
-      const res = await apiPost<{ twoFactorRequired?: boolean; challengeToken?: string }>("/api/auth/login", payload);
+      const res = await apiPost<{ twoFactorRequired?: boolean; challengeToken?: string; landingPath?: string }>("/api/auth/login", payload);
       if (res.twoFactorRequired && res.challengeToken) {
         setChallengeToken(res.challengeToken);
         return;
       }
-      router.push(searchParams.get("next") ?? "/dashboard");
+      router.push(searchParams.get("next") ?? res.landingPath ?? "/dashboard");
       router.refresh();
     } catch (err) {
       setFormError(err instanceof ApiClientError ? err.message : "Something went wrong. Please try again.");
@@ -56,8 +56,8 @@ function LoginForm() {
     setFormError(null);
     setLoading(true);
     try {
-      await apiPost("/api/auth/2fa/verify", { challengeToken, code: twoFactorCode });
-      router.push(searchParams.get("next") ?? "/dashboard");
+      const res = await apiPost<{ landingPath?: string }>("/api/auth/2fa/verify", { challengeToken, code: twoFactorCode });
+      router.push(searchParams.get("next") ?? res.landingPath ?? "/dashboard");
       router.refresh();
     } catch (err) {
       setFormError(err instanceof ApiClientError ? err.message : "Verification failed.");

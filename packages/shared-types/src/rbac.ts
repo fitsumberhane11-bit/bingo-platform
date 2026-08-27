@@ -23,6 +23,10 @@ export const PERMISSIONS = {
   GAME_CANCEL: "game:cancel",
   GAME_CALL_NUMBER: "game:call_number",
   GAME_VIEW: "game:view",
+  GAME_END: "game:end",
+  GAME_PRIZE_SET: "game:prize_set", // set the per-game operator-authoritative prize amount — distinct from PRIZE_RULE_MANAGE (defining reusable rule templates)
+  GAME_RULES_SET: "game:rules_set", // configure a game's winning stage(s) from existing patterns — distinct from WINNING_PATTERN_MANAGE (defining new pattern shapes)
+  GAME_CLAIM_CONFIRM: "game:claim_confirm", // confirm/reject a player's BINGO claim
 
   // Prize / pattern configuration (financial-adjacent, restricted from operators)
   PRIZE_RULE_MANAGE: "prize_rule:manage",
@@ -65,22 +69,31 @@ export type RoleName = (typeof ROLES)[keyof typeof ROLES];
  * implicitly has every permission (checked separately, not listed here) so
  * that adding a new permission never silently locks super admins out.
  *
- * This is the canonical, finalized permission matrix (approved 2026-08-17):
+ * This is the canonical, finalized permission matrix (approved 2026-08-26):
  *
  * | Permission       | SUPER_ADMIN | ADMIN | GAME_OPERATOR | FINANCE | SUPPORT |
  * |------------------|-------------|-------|----------------|---------|---------|
  * | Manage users     | YES         | YES   | NO             | NO      | View    |
- * | Create games     | YES         | YES   | YES            | NO      | NO      |
- * | Run games        | YES         | YES   | YES            | NO      | NO      |
+ * | Create/run games | YES         | NO    | YES            | NO      | NO      |
+ * | View games       | YES         | YES   | YES            | NO      | View    |
  * | View payments    | YES         | YES   | NO             | YES     | Limited |
  * | Reconcile        | YES         | NO    | NO             | YES     | NO      |
  * | Withdrawals      | YES         | NO    | NO             | YES     | View    |
- * | Announcements    | YES         | YES   | YES            | NO      | NO      |
+ * | Announcements    | YES         | NO    | YES            | NO      | NO      |
+ * | Define prize/pattern rules | YES | YES | NO           | NO      | NO      |
  * | System settings  | YES         | NO    | NO             | NO      | NO      |
  *
- * GAME_OPERATOR may create/run games (picking from existing prize rules and
- * winning patterns) but never PRIZE_RULE_MANAGE/WINNING_PATTERN_MANAGE —
- * defining the rules that determine payouts stays out of operator reach.
+ * GAME_OPERATOR is the exclusive day-to-day game-runner (approved
+ * 2026-08-26): only GAME_OPERATOR and SUPER_ADMIN can create, configure, or
+ * run a live game (open/start/pause/resume/cancel/end/call numbers/set a
+ * game's prize or stages/confirm BINGO claims) or send player
+ * announcements. ADMIN is back-office only — user management, defining the
+ * *reusable* prize-rule/winning-pattern templates operators pick from
+ * (PRIZE_RULE_MANAGE/WINNING_PATTERN_MANAGE — distinct from actually
+ * running a game), viewing payments/reports/audit log, and role
+ * management. This is a deliberate separation of duties: whoever can touch
+ * a live game floor should not also be the one editing user accounts, and
+ * vice versa.
  * ADMIN deliberately does NOT get SETTINGS_MANAGE or WITHDRAWAL_VIEW —
  * system configuration and moving real money out both stay SUPER_ADMIN/
  * FINANCE-only, even though ADMIN can view deposits (PAYMENT_VIEW).
@@ -91,19 +104,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<RoleName, "SUPER_ADMIN">, 
     PERMISSIONS.USER_SUSPEND,
     PERMISSIONS.USER_ACTIVATE,
     PERMISSIONS.USER_VIEW_SENSITIVE,
-    PERMISSIONS.GAME_CREATE,
-    PERMISSIONS.GAME_EDIT,
-    PERMISSIONS.GAME_OPEN,
-    PERMISSIONS.GAME_START,
-    PERMISSIONS.GAME_PAUSE,
-    PERMISSIONS.GAME_RESUME,
-    PERMISSIONS.GAME_CANCEL,
-    PERMISSIONS.GAME_CALL_NUMBER,
     PERMISSIONS.GAME_VIEW,
     PERMISSIONS.PRIZE_RULE_MANAGE,
     PERMISSIONS.WINNING_PATTERN_MANAGE,
     PERMISSIONS.PAYMENT_VIEW,
-    PERMISSIONS.ANNOUNCEMENT_CREATE,
     PERMISSIONS.REPORTS_VIEW,
     PERMISSIONS.AUDIT_LOG_VIEW,
     PERMISSIONS.ROLE_MANAGE,
@@ -118,6 +122,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<RoleName, "SUPER_ADMIN">, 
     PERMISSIONS.GAME_RESUME,
     PERMISSIONS.GAME_CANCEL,
     PERMISSIONS.GAME_CALL_NUMBER,
+    PERMISSIONS.GAME_END,
+    PERMISSIONS.GAME_PRIZE_SET,
+    PERMISSIONS.GAME_RULES_SET,
+    PERMISSIONS.GAME_CLAIM_CONFIRM,
     PERMISSIONS.ANNOUNCEMENT_CREATE,
   ],
   FINANCE: [

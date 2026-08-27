@@ -129,32 +129,55 @@ beforeAll(async () => {
  * reversal entry is itself tagged with this game's id, so summing again
  * nets to zero and nothing further is written.
  */
-async function reverseGamePlatformFootprint(gameId: string) {
+// Mirrors platform-ledger.ts's DELTA_SIGN table — keep in sync if that changes.
+const LEDGER_SIGN: Record<string, number> = {
+  PRIZE_POOL_CONTRIBUTION: 1,
+  PLATFORM_FEE_REVENUE: 1,
+  PRIZE_PAYOUT: -1,
+  PRIZE_POOL_FORFEITED: 0,
+  REFUND: -1,
+};
+
+async function computeGameNet(gameId: string): Promise<Prisma.Decimal> {
   const entries = await prisma.platformLedgerEntry.findMany({ where: { relatedGameId: gameId } });
-  if (entries.length === 0) return;
+  return entries.reduce((sum, e) => sum.plus(e.amount.times(LEDGER_SIGN[e.type] ?? 0)), new Prisma.Decimal(0));
+}
 
-  // Mirrors platform-ledger.ts's DELTA_SIGN table — keep in sync if that changes.
-  const sign: Record<string, number> = {
-    PRIZE_POOL_CONTRIBUTION: 1,
-    PLATFORM_FEE_REVENUE: 1,
-    PRIZE_PAYOUT: -1,
-    PRIZE_POOL_FORFEITED: 0,
-    REFUND: -1,
-  };
-  const net = entries.reduce((sum, e) => sum.plus(e.amount.times(sign[e.type] ?? 0)), new Prisma.Decimal(0));
-  if (net.lte(0)) return; // nothing left on the account to reverse
-
-  await applyPlatformLedgerEntry({
-    type: "REFUND",
-    amount: net,
-    referenceId: `test-cleanup-reversal:${gameId}`,
-    relatedGameId: gameId,
-  });
+async function reverseGamePlatformFootprint(gameId: string) {
+  const net = await computeGameNet(gameId);
+  if (net.isZero()) return;
+  // Positive net (sales-derived reservation exceeded what was paid out)
+  // reverses as a REFUND (debit). A fixed/staged prize can legitimately
+  // exceed sales-derived reservation — a genuinely negative net footprint
+  // — which needs the opposite: crediting the platform account back up by
+  // the deficit. Silently skipping the negative case (as an earlier
+  // version of this helper did) leaves permanent drift on the shared
+  // PlatformAccount — see feedback_bingo_test_data_hygiene memory.
+  if (net.gt(0)) {
+    await applyPlatformLedgerEntry({ type: "REFUND", amount: net, referenceId: `test-cleanup-reversal:${gameId}`, relatedGameId: gameId });
+  } else {
+    await applyPlatformLedgerEntry({
+      type: "PRIZE_POOL_CONTRIBUTION",
+      amount: net.abs(),
+      referenceId: `test-cleanup-reversal:${gameId}`,
+      relatedGameId: gameId,
+    });
+  }
 }
 
 afterAll(async () => {
-  for (const gameId of createdGameIds) {
+  // Settle money first, credits (negative net) before debits (positive
+  // net) — reversing in raw creation order can ask the shared
+  // PlatformAccount to cover a debit before this file's own credits have
+  // landed, tripping the insufficient-funds guard even when the file's
+  // *total* footprint nets out fine.
+  const nets = await Promise.all(createdGameIds.map(async (gameId) => ({ gameId, net: await computeGameNet(gameId) })));
+  nets.sort((a, b) => a.net.comparedTo(b.net));
+  for (const { gameId } of nets) {
     await reverseGamePlatformFootprint(gameId);
+  }
+
+  for (const gameId of createdGameIds) {
     await prisma.winner.deleteMany({ where: { gameId } });
     await prisma.gameEvent.deleteMany({ where: { gameId } });
     await prisma.bingoNumber.deleteMany({ where: { gameId } });
@@ -173,6 +196,10 @@ afterAll(async () => {
     await prisma.walletTransaction.deleteMany({ where: { userId } });
     await prisma.wallet.deleteMany({ where: { userId } });
     await prisma.userRole.deleteMany({ where: { userId } });
+    // The game-start announcement ("Game is starting in Ns") is authored by
+    // whoever called startGame() (superAdminCookie here) — must go before
+    // the user row, same FK-RESTRICT reason as the winner-confirmation fix.
+    await prisma.announcement.deleteMany({ where: { createdByUserId: userId } });
     await prisma.user.deleteMany({ where: { id: userId } });
   }
   await prisma.$disconnect();
@@ -273,7 +300,7 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
         maxPlayers: 10,
         maxTicketsPerPlayer: 5,
         minPlayers: 1,
-        callIntervalSeconds: 3,
+        callIntervalSeconds: 5,
         callMode: "MANUAL",
         winningPatternId: patterns[0].id,
         prizeRuleId: rules[0].id,
@@ -351,7 +378,7 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
         maxPlayers: 10,
         maxTicketsPerPlayer: 5,
         minPlayers: 1,
-        callIntervalSeconds: 3,
+        callIntervalSeconds: 5,
         callMode: "MANUAL",
         winningPatternId: patterns[0].id,
         prizeRuleId: rule.id,
@@ -379,6 +406,8 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
     expect(editAfterScheduled.status).toBe(409);
   });
 
+  // Needs to comfortably exceed the 29s real STARTING countdown below, plus
+  // HTTP round-trip overhead — default 30s test timeout isn't enough.
   it("call-next ignores any client-supplied ball number — the server alone determines which ball is called", async () => {
     const patternsRes = await apiFetch("/api/admin/winning-patterns", { cookie: superAdminCookie });
     const rulesRes = await apiFetch("/api/admin/prize-rules", { cookie: superAdminCookie });
@@ -399,7 +428,7 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
         maxPlayers: 10,
         maxTicketsPerPlayer: 5,
         minPlayers: 1,
-        callIntervalSeconds: 3,
+        callIntervalSeconds: 5,
         callMode: "MANUAL",
         winningPatternId: patterns[0].id,
         prizeRuleId: rules[0].id,
@@ -416,8 +445,11 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
     expect(startRes.status).toBe(200);
 
     // MANUAL mode with minPlayers already met still runs the STARTING
-    // countdown before going LIVE — wait it out.
-    await new Promise((r) => setTimeout(r, 12_000));
+    // countdown before going LIVE — wait it out. This test hits an
+    // actually-running server (not the in-process vitest env), so it
+    // can't benefit from vitest.config.ts's GAME_STARTING_COUNTDOWN_SECONDS
+    // override; it has to wait out the real default (29s — see engine.ts).
+    await new Promise((r) => setTimeout(r, 31_000));
 
     // The attack: try to force ball 75 (O-75) via the request body.
     const callRes = await apiFetch(`/api/admin/games/${game.id}/call-next`, {
@@ -465,7 +497,7 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
     for (const uncalled of uncalledBalls.slice(0, 5)) {
       expect(fairnessBody.data.calledSequence).not.toContain(uncalled);
     }
-  }, 30000);
+  }, 45000);
 
   it("rejects invalid game creation input server-side (negative price, bad registration window)", async () => {
     const patternsRes = await apiFetch("/api/admin/winning-patterns", { cookie: superAdminCookie });
@@ -483,7 +515,7 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
       maxPlayers: 10,
       maxTicketsPerPlayer: 5,
       minPlayers: 1,
-      callIntervalSeconds: 3,
+      callIntervalSeconds: 5,
       callMode: "MANUAL",
       winningPatternId: patterns[0].id,
       prizeRuleId: rules[0].id,
@@ -543,7 +575,7 @@ describe.skipIf(!serverReachable)("HTTP-level security matrix", () => {
         maxPlayers: 10,
         maxTicketsPerPlayer: 5,
         minPlayers: 1,
-        callIntervalSeconds: 3,
+        callIntervalSeconds: 5,
         callMode: "MANUAL",
         winningPatternId: patterns[0].id,
         prizeRuleId: rules[0].id,

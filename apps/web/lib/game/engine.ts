@@ -14,12 +14,35 @@ import { writeAuditLog } from "../audit";
 import { notifyUser } from "../notifications";
 import { applyWalletTransaction } from "../wallet-service";
 import { getGameBroadcaster } from "./broadcaster";
-import { detectAndRecordWinners } from "./winners";
 import { applyPlatformLedgerEntry } from "./platform-ledger";
+import { postGameAnnouncement } from "./announcements";
 
-// Overridable so integration tests don't have to burn 10 real seconds per
-// game-start assertion; production always uses the 10s default.
-const STARTING_COUNTDOWN_SECONDS = Number(process.env.GAME_STARTING_COUNTDOWN_SECONDS ?? 10);
+// Overridable so integration tests don't have to burn real seconds per
+// game-start assertion; production always uses the 29s default.
+const STARTING_COUNTDOWN_SECONDS = Number(process.env.GAME_STARTING_COUNTDOWN_SECONDS ?? 29);
+
+// Short, human-typeable per-game reference code — see the schema comment
+// on Game.gameCode. Alphabet excludes 0/O/1/I/L so a code read aloud or
+// copied by hand is never ambiguous.
+const GAME_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const GAME_CODE_LENGTH = 6;
+
+function randomGameCode(): string {
+  let code = "";
+  for (let i = 0; i < GAME_CODE_LENGTH; i++) {
+    code += GAME_CODE_ALPHABET[Math.floor(Math.random() * GAME_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+async function generateUniqueGameCode(): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = randomGameCode();
+    const existing = await prisma.game.findUnique({ where: { gameCode: code }, select: { id: true } });
+    if (!existing) return code;
+  }
+  throw new Error("Could not generate a unique game code after 10 attempts.");
+}
 
 export interface CreateGameInput {
   name: string;
@@ -38,6 +61,10 @@ export interface CreateGameInput {
   manualMarkEnabled?: boolean;
   winningPatternId: string;
   prizeRuleId: string;
+  /** Operator-authoritative prize amount (Section 2) — when set, this is the ONE true prize, never derived from ticket sales. */
+  operatorPrizeAmount?: number;
+  /** Configurable false-Bingo policy (Section 16). Defaults to warn(1)/disqualify-card(2)/remove-player(3) if omitted. */
+  falseBingoPolicy?: { warnAt?: number; disqualifyCardAt?: number; removePlayerAt?: number };
 }
 
 export async function createGame(input: CreateGameInput, actorId: string): Promise<Game> {
@@ -50,11 +77,16 @@ export async function createGame(input: CreateGameInput, actorId: string): Promi
   if (input.minPlayers > input.maxPlayers) {
     throw new ValidationError("Minimum players cannot exceed maximum players.");
   }
+  if (input.operatorPrizeAmount != null && !(input.operatorPrizeAmount > 0)) {
+    throw new ValidationError("Prize amount must be a positive number.");
+  }
 
   const seed = generateSecretSeed();
+  const gameCode = await generateUniqueGameCode();
   const game = await prisma.game.create({
     data: {
       name: input.name,
+      gameCode,
       description: input.description,
       status: "DRAFT",
       gameDate: input.gameDate,
@@ -71,6 +103,8 @@ export async function createGame(input: CreateGameInput, actorId: string): Promi
       manualMarkEnabled: input.manualMarkEnabled ?? false,
       winningPatternId: input.winningPatternId,
       prizeRuleId: input.prizeRuleId,
+      operatorPrizeAmount: input.operatorPrizeAmount,
+      falseBingoPolicy: input.falseBingoPolicy ?? undefined,
       seedCommitmentHash: commitmentHash(seed),
       secretSeedEncrypted: encryptSecret(seed),
       createdByUserId: actorId,
@@ -146,6 +180,11 @@ async function transitionGame(
   });
 
   getGameBroadcaster().publish(gameId, "game:status", { status: to, at: new Date().toISOString() });
+  // Also fanned out on the platform-wide "global" channel — this is what
+  // lets the lobby (/play) and dashboard live-update the moment a game
+  // opens for registration, without the player needing to refresh. See
+  // components/live/LiveRefresh.tsx.
+  getGameBroadcaster().publish("global", "game:lobby-update", { gameId, status: to });
 
   return updated;
 }
@@ -185,6 +224,16 @@ export async function startGame(gameId: string, actorId: string): Promise<Game> 
 
   const updated = await transitionGame(gameId, actorId, "STARTING");
   getGameBroadcaster().publish(gameId, "game:countdown", { seconds: STARTING_COUNTDOWN_SECONDS });
+  await postGameAnnouncement({
+    gameId,
+    type: "IMPORTANT",
+    createdByUserId: actorId,
+    message: `⏱️ Game is starting in ${STARTING_COUNTDOWN_SECONDS} seconds — get ready!`,
+    // Stops showing itself the moment the countdown ends (LIVE) — it has
+    // nothing left to say once the game has actually started, and would
+    // otherwise sit in the announcements list indefinitely.
+    expiresAt: new Date(Date.now() + STARTING_COUNTDOWN_SECONDS * 1000),
+  });
 
   scheduleCountdownToLive(gameId);
   return updated;
@@ -398,6 +447,13 @@ export async function cancelGame(gameId: string, actorId: string, reason: string
  * determined and committed to (via its SHA-256 hash) before the game ever
  * went LIVE. A GAME_OPERATOR calling this endpoint controls *when*; they
  * supply no input that influences *which number*.
+ *
+ * Deliberately does NOT sweep for or declare winners — that used to happen
+ * synchronously right here, which is exactly what made the game "play
+ * itself." Winner detection is now entirely player-initiated: a player who
+ * believes they've won submits a claim (see claims.ts's submitBingoClaim),
+ * which the server validates against the same authoritative called-numbers
+ * data this function produces. This function's only job is calling numbers.
  */
 export async function callNextNumber(gameId: string, actorId: string | null): Promise<{ ballNumber: number; letter: string; sequenceNumber: number } | null> {
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -431,24 +487,25 @@ export async function callNextNumber(gameId: string, actorId: string | null): Pr
 
     getGameBroadcaster().publish(gameId, "game:number-called", { ballNumber, letter, sequenceNumber: newSequenceNumber });
 
-    const calledSet = new Set(
-      (await prisma.bingoNumber.findMany({ where: { gameId }, select: { ballNumber: true } })).map((n) => n.ballNumber),
-    );
-
-    const gameWithConfig = await prisma.game.findUniqueOrThrow({
-      where: { id: gameId },
-      include: { winningPattern: true, prizeRule: true },
-    });
-    const { winnerCount } = await detectAndRecordWinners(gameWithConfig, calledSet, newSequenceNumber, ballNumber);
-
-    if (winnerCount > 0) {
-      await completeGame(gameId, actorId, `Winner(s) found on call #${newSequenceNumber} (${letter}-${ballNumber}).`);
-    }
-
     return { ballNumber, letter, sequenceNumber: newSequenceNumber };
   }
 
   throw new Error(`callNextNumber for game ${gameId} failed after multiple concurrent-modification retries.`);
+}
+
+/**
+ * Explicit operator "End Game" action (Section 26) — distinct from the
+ * automatic forfeit-completion above (all 75 called, no winner). Lets an
+ * operator end a LIVE/PAUSED game early for any reason (e.g. all configured
+ * prize stages are already won, or a real-world need to stop the session).
+ */
+export async function endGame(gameId: string, actorId: string, reason?: string): Promise<Game> {
+  const game = await prisma.game.findUnique({ where: { id: gameId } });
+  if (!game) throw new NotFoundError("Game not found.");
+  if (game.status !== "LIVE" && game.status !== "PAUSED") {
+    throw new ConflictError(`Cannot end a game that is ${game.status}.`);
+  }
+  return completeGame(gameId, actorId, reason ?? "Ended by operator.");
 }
 
 export async function completeGame(gameId: string, actorId: string | null, note?: string): Promise<Game> {

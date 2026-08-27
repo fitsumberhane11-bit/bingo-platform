@@ -34,6 +34,10 @@ export function apiPatch<T>(path: string, data?: unknown): Promise<T> {
   return apiFetch<T>(path, { method: "PATCH", body: data ? JSON.stringify(data) : undefined });
 }
 
+export function apiPut<T>(path: string, data?: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "PUT", body: data ? JSON.stringify(data) : undefined });
+}
+
 export function apiGet<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "GET" });
 }

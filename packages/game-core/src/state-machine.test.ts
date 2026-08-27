@@ -18,6 +18,7 @@ const VALID_PAIRS = new Set([
   "LIVE->COMPLETED",
   "LIVE->CANCELLED",
   "PAUSED->LIVE",
+  "PAUSED->COMPLETED",
   "PAUSED->CANCELLED",
 ]);
 

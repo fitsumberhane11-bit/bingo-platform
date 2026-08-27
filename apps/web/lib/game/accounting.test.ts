@@ -79,27 +79,36 @@ async function makeGame(ticketPrice: number) {
  * tagged with this game's id, so summing again nets to zero and nothing
  * further is written.
  */
-async function reverseGamePlatformFootprint(gameId: string) {
+// Mirrors platform-ledger.ts's DELTA_SIGN table — keep in sync if that changes.
+const LEDGER_SIGN: Record<string, number> = {
+  PRIZE_POOL_CONTRIBUTION: 1,
+  PLATFORM_FEE_REVENUE: 1,
+  PRIZE_PAYOUT: -1,
+  PRIZE_POOL_FORFEITED: 0,
+  REFUND: -1,
+};
+
+async function computeGameNet(gameId: string): Promise<Prisma.Decimal> {
   const entries = await prisma.platformLedgerEntry.findMany({ where: { relatedGameId: gameId } });
-  if (entries.length === 0) return;
+  return entries.reduce((sum, e) => sum.plus(e.amount.times(LEDGER_SIGN[e.type] ?? 0)), new Prisma.Decimal(0));
+}
 
-  // Mirrors platform-ledger.ts's DELTA_SIGN table — keep in sync if that changes.
-  const sign: Record<string, number> = {
-    PRIZE_POOL_CONTRIBUTION: 1,
-    PLATFORM_FEE_REVENUE: 1,
-    PRIZE_PAYOUT: -1,
-    PRIZE_POOL_FORFEITED: 0,
-    REFUND: -1,
-  };
-  const net = entries.reduce((sum, e) => sum.plus(e.amount.times(sign[e.type] ?? 0)), new Prisma.Decimal(0));
-  if (net.lte(0)) return; // nothing left on the account to reverse
-
-  await applyPlatformLedgerEntry({
-    type: "REFUND",
-    amount: net,
-    referenceId: `test-cleanup-reversal:${gameId}`,
-    relatedGameId: gameId,
-  });
+// A fixed/staged prize can legitimately exceed sales-derived reservation —
+// a genuinely negative net footprint — which needs a credit back, not a
+// REFUND debit. See feedback_bingo_test_data_hygiene memory.
+async function reverseGamePlatformFootprint(gameId: string) {
+  const net = await computeGameNet(gameId);
+  if (net.isZero()) return;
+  if (net.gt(0)) {
+    await applyPlatformLedgerEntry({ type: "REFUND", amount: net, referenceId: `test-cleanup-reversal:${gameId}`, relatedGameId: gameId });
+  } else {
+    await applyPlatformLedgerEntry({
+      type: "PRIZE_POOL_CONTRIBUTION",
+      amount: net.abs(),
+      referenceId: `test-cleanup-reversal:${gameId}`,
+      relatedGameId: gameId,
+    });
+  }
 }
 
 beforeAll(async () => {
@@ -112,8 +121,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  for (const gameId of createdGameIds) {
+  // Settle money first, credits (negative net) before debits (positive
+  // net) — see claims.test.ts's afterAll for the full rationale.
+  const nets = await Promise.all(createdGameIds.map(async (gameId) => ({ gameId, net: await computeGameNet(gameId) })));
+  nets.sort((a, b) => a.net.comparedTo(b.net));
+  for (const { gameId } of nets) {
     await reverseGamePlatformFootprint(gameId);
+  }
+
+  for (const gameId of createdGameIds) {
     await prisma.winner.deleteMany({ where: { gameId } });
     await prisma.gameEvent.deleteMany({ where: { gameId } });
     // Deliberately NOT deleting PlatformLedgerEntry rows: the singleton

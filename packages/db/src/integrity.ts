@@ -41,15 +41,25 @@ export async function checkWalletReconstruction(prisma: PrismaClient): Promise<C
 }
 
 export async function checkPlatformConservation(prisma: PrismaClient): Promise<CheckResult> {
-  const [depositAgg, withdrawalAgg, adjustments, walletAgg, platformAccount] = await Promise.all([
+  const [depositAgg, withdrawalAgg, adjustments, platformAdjustmentAgg, walletAgg, platformAccount] = await Promise.all([
     prisma.walletTransaction.aggregate({ where: { type: "DEPOSIT", status: "COMPLETED" }, _sum: { amount: true } }),
     prisma.walletTransaction.aggregate({ where: { type: "WITHDRAWAL", status: "COMPLETED" }, _sum: { amount: true } }),
     prisma.walletTransaction.findMany({ where: { type: "ADJUSTMENT", status: "COMPLETED" }, select: { balanceBefore: true, balanceAfter: true } }),
+    // The platform's own working capital, independent of any player
+    // deposit — e.g. topping up the reserve so it can honor a FIXED prize
+    // that legitimately exceeds one game's own ticket sales (by design).
+    // Counted the same way a user-wallet ADJUSTMENT is: a real addition to
+    // what the platform should be holding, not something game-footprint
+    // reversal ever touches.
+    prisma.platformLedgerEntry.aggregate({ where: { type: "PLATFORM_ADJUSTMENT" }, _sum: { amount: true } }),
     prisma.wallet.aggregate({ _sum: { availableBalance: true, pendingBalance: true } }),
     prisma.platformAccount.findUnique({ where: { singleton: 1 } }),
   ]);
   const netAdjustments = adjustments.reduce((sum, a) => sum.plus(a.balanceAfter.minus(a.balanceBefore)), ZERO);
-  const expected = (depositAgg._sum.amount ?? ZERO).minus(withdrawalAgg._sum.amount ?? ZERO).plus(netAdjustments);
+  const expected = (depositAgg._sum.amount ?? ZERO)
+    .minus(withdrawalAgg._sum.amount ?? ZERO)
+    .plus(netAdjustments)
+    .plus(platformAdjustmentAgg._sum.amount ?? ZERO);
   const actual = (walletAgg._sum.availableBalance ?? ZERO).plus(walletAgg._sum.pendingBalance ?? ZERO).plus(platformAccount?.availableBalance ?? ZERO);
   const diff = expected.minus(actual).abs();
   return {

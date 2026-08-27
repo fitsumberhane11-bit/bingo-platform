@@ -26,6 +26,7 @@ const DELTA_SIGN: Record<PlatformLedgerType, 1 | -1 | 0> = {
   PRIZE_PAYOUT: -1,
   PRIZE_POOL_FORFEITED: 0, // reclassifies already-held funds from liability to revenue; no cash movement
   REFUND: -1,
+  PLATFORM_ADJUSTMENT: 1, // the platform's own working capital, independent of any player deposit — see the schema comment on PlatformLedgerType
 };
 
 export interface PlatformLedgerInput {

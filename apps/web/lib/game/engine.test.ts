@@ -16,6 +16,7 @@ import {
   stopAutoCaller,
 } from "./engine";
 import { purchaseTickets } from "./tickets";
+import { submitBingoClaim, confirmBingoClaim } from "./claims";
 import { applyPlatformLedgerEntry } from "./platform-ledger";
 import { getGameBroadcaster } from "./broadcaster";
 
@@ -129,27 +130,36 @@ async function craftWinningCard(seed: string, calledSoFarCount: number): Promise
  * tagged with this game's id, so summing again nets to zero and nothing
  * further is written.
  */
-async function reverseGamePlatformFootprint(gameId: string) {
+// Mirrors platform-ledger.ts's DELTA_SIGN table — keep in sync if that changes.
+const LEDGER_SIGN: Record<string, number> = {
+  PRIZE_POOL_CONTRIBUTION: 1,
+  PLATFORM_FEE_REVENUE: 1,
+  PRIZE_PAYOUT: -1,
+  PRIZE_POOL_FORFEITED: 0,
+  REFUND: -1,
+};
+
+async function computeGameNet(gameId: string): Promise<Prisma.Decimal> {
   const entries = await prisma.platformLedgerEntry.findMany({ where: { relatedGameId: gameId } });
-  if (entries.length === 0) return;
+  return entries.reduce((sum, e) => sum.plus(e.amount.times(LEDGER_SIGN[e.type] ?? 0)), new Prisma.Decimal(0));
+}
 
-  // Mirrors platform-ledger.ts's DELTA_SIGN table — keep in sync if that changes.
-  const sign: Record<string, number> = {
-    PRIZE_POOL_CONTRIBUTION: 1,
-    PLATFORM_FEE_REVENUE: 1,
-    PRIZE_PAYOUT: -1,
-    PRIZE_POOL_FORFEITED: 0,
-    REFUND: -1,
-  };
-  const net = entries.reduce((sum, e) => sum.plus(e.amount.times(sign[e.type] ?? 0)), new Prisma.Decimal(0));
-  if (net.lte(0)) return; // nothing left on the account to reverse
-
-  await applyPlatformLedgerEntry({
-    type: "REFUND",
-    amount: net,
-    referenceId: `test-cleanup-reversal:${gameId}`,
-    relatedGameId: gameId,
-  });
+// A fixed/staged prize can legitimately exceed sales-derived reservation —
+// a genuinely negative net footprint — which needs a credit back, not a
+// REFUND debit. See feedback_bingo_test_data_hygiene memory.
+async function reverseGamePlatformFootprint(gameId: string) {
+  const net = await computeGameNet(gameId);
+  if (net.isZero()) return;
+  if (net.gt(0)) {
+    await applyPlatformLedgerEntry({ type: "REFUND", amount: net, referenceId: `test-cleanup-reversal:${gameId}`, relatedGameId: gameId });
+  } else {
+    await applyPlatformLedgerEntry({
+      type: "PRIZE_POOL_CONTRIBUTION",
+      amount: net.abs(),
+      referenceId: `test-cleanup-reversal:${gameId}`,
+      relatedGameId: gameId,
+    });
+  }
 }
 
 beforeAll(async () => {
@@ -168,9 +178,18 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  for (const gameId of createdGameIds) {
+  // Settle money first, credits (negative net) before debits (positive
+  // net) — see claims.test.ts's afterAll for the full rationale.
+  const nets = await Promise.all(createdGameIds.map(async (gameId) => ({ gameId, net: await computeGameNet(gameId) })));
+  nets.sort((a, b) => a.net.comparedTo(b.net));
+  for (const { gameId } of nets) {
     await reverseGamePlatformFootprint(gameId);
+  }
+
+  for (const gameId of createdGameIds) {
     await prisma.winner.deleteMany({ where: { gameId } });
+    await prisma.bingoClaim.deleteMany({ where: { gameId } }); // must go before tickets — BingoClaim.ticketId is RESTRICT
+    await prisma.winningStage.deleteMany({ where: { gameId } });
     await prisma.gameEvent.deleteMany({ where: { gameId } });
     await prisma.bingoNumber.deleteMany({ where: { gameId } });
     // Deliberately NOT deleting PlatformLedgerEntry rows — see the matching
@@ -185,6 +204,11 @@ afterAll(async () => {
   for (const userId of [adminId, playerAId, playerBId]) {
     await prisma.notification.deleteMany({ where: { userId } });
     await prisma.auditLog.deleteMany({ where: { actorUserId: userId } });
+    // A confirmed winner now posts a real Announcement (createdByUserId:
+    // the confirming actor) — that FK is NOT NULL/RESTRICT, unlike
+    // Announcement.gameId (nullable, SET NULL), so it must be cleared
+    // before the user row can be hard-deleted below.
+    await prisma.announcement.deleteMany({ where: { createdByUserId: userId } });
     await prisma.walletTransaction.deleteMany({ where: { userId } });
     await prisma.wallet.deleteMany({ where: { userId } });
     await prisma.user.delete({ where: { id: userId } });
@@ -192,7 +216,7 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("full game lifecycle: create -> join -> play -> win", () => {
+describe("full game lifecycle: create -> join -> play -> claim -> confirm -> win", () => {
   it("takes a game from DRAFT to a completed win with the correct wallet credit", async () => {
     const game = await makeGame({ maxPlayers: 5 });
     expect(game.status).toBe("DRAFT");
@@ -223,18 +247,31 @@ describe("full game lifecycle: create -> join -> play -> win", () => {
     const ticketA = await prisma.bingoTicket.findFirstOrThrow({ where: { gameId: game.id, userId: playerAId } });
     await prisma.bingoTicket.update({ where: { id: ticketA.id }, data: { cardNumbers: card as unknown as object } });
 
-    let lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
-    for (let i = 0; i < callsNeeded && lastGame.status === "LIVE"; i++) {
+    for (let i = 0; i < callsNeeded; i++) {
       await callNextNumber(game.id, adminId);
-      lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
     }
 
+    // Calling numbers no longer auto-declares a winner — the game must
+    // still be LIVE, waiting for a player to claim it (Section 11/13-21).
+    const stillLive = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+    expect(stillLive.status).toBe("LIVE");
+
+    const claimResult = await submitBingoClaim({ gameId: game.id, ticketId: ticketA.id, userId: playerAId });
+    expect(claimResult.won).toBe(true);
+    expect(claimResult.claim.validationStatus).toBe("VALID");
+    expect(claimResult.claim.confirmationStatus).toBe("PENDING"); // waiting on an operator, not yet paid
+
+    const { confirmed } = await confirmBingoClaim(claimResult.claim.id, adminId);
+    expect(confirmed).toHaveLength(1);
+
+    const lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
     expect(lastGame.status).toBe("COMPLETED");
     expect(lastGame.seedRevealedAt).not.toBeNull();
 
     const winner = await prisma.winner.findUnique({ where: { ticketId: ticketA.id } });
     expect(winner).not.toBeNull();
     expect(winner!.userId).toBe(playerAId);
+    expect(winner!.claimId).toBe(claimResult.claim.id);
 
     const walletAfter = await prisma.wallet.findUniqueOrThrow({ where: { userId: playerAId } });
     // -10 (ticket) + prize > 0 net change expected since prize pool > ticket price for a 2-ticket pool.
@@ -244,7 +281,7 @@ describe("full game lifecycle: create -> join -> play -> win", () => {
 });
 
 describe("simultaneous winners share the prize pool", () => {
-  it("records both winners on the same call and splits the pool", async () => {
+  it("confirming one of two pending same-call claims resolves both and splits the pool", async () => {
     const game = await makeGame({ maxPlayers: 5 });
     await scheduleGame(game.id, adminId);
     await openGame(game.id, adminId);
@@ -265,11 +302,22 @@ describe("simultaneous winners share the prize pool", () => {
     await prisma.bingoTicket.update({ where: { id: ticketA.id }, data: { cardNumbers: card as unknown as object } });
     await prisma.bingoTicket.update({ where: { id: ticketB.id }, data: { cardNumbers: card as unknown as object } });
 
-    let lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
-    for (let i = 0; i < callsNeeded && lastGame.status === "LIVE"; i++) {
+    for (let i = 0; i < callsNeeded; i++) {
       await callNextNumber(game.id, adminId);
-      lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
     }
+
+    // Both players notice the win and claim on the same call — both claims
+    // land PENDING before either is confirmed, exactly the "shout Bingo at
+    // the same time" scenario.
+    const claimA = await submitBingoClaim({ gameId: game.id, ticketId: ticketA.id, userId: playerAId });
+    const claimB = await submitBingoClaim({ gameId: game.id, ticketId: ticketB.id, userId: playerBId });
+    expect(claimA.won).toBe(true);
+    expect(claimB.won).toBe(true);
+
+    // Confirming EITHER ONE resolves every other still-pending sibling
+    // claim for the same pattern together, in one action.
+    const { confirmed } = await confirmBingoClaim(claimA.claim.id, adminId);
+    expect(confirmed).toHaveLength(2);
 
     const winners = await prisma.winner.findMany({ where: { gameId: game.id } });
     expect(winners).toHaveLength(2);
@@ -288,8 +336,8 @@ describe("the game:winner broadcast carries the winner's username", () => {
     // event (see GameRoom.tsx history), so every non-winning player saw
     // only "Ticket #N won" with no identity, contradicting the product
     // requirement that spectators see who won — found live in the browser,
-    // fixed by including `user: { select: { username: true } }` in
-    // winners.ts's ticket query and publishing it on the broadcast.
+    // fixed by including the ticket's username on the claim-confirmation
+    // path (claims.ts) that now owns this broadcast.
     const game = await makeGame({ maxPlayers: 5 });
     await scheduleGame(game.id, adminId);
     await openGame(game.id, adminId);
@@ -306,12 +354,13 @@ describe("the game:winner broadcast carries the winner's username", () => {
     const ticket = await prisma.bingoTicket.findFirstOrThrow({ where: { gameId: game.id, userId: playerAId } });
     await prisma.bingoTicket.update({ where: { id: ticket.id }, data: { cardNumbers: card as unknown as object } });
 
-    const publishSpy = vi.spyOn(getGameBroadcaster(), "publish");
-    let lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
-    for (let i = 0; i < callsNeeded && lastGame.status === "LIVE"; i++) {
+    for (let i = 0; i < callsNeeded; i++) {
       await callNextNumber(game.id, adminId);
-      lastGame = await prisma.game.findUniqueOrThrow({ where: { id: game.id } });
     }
+
+    const claim = await submitBingoClaim({ gameId: game.id, ticketId: ticket.id, userId: playerAId });
+    const publishSpy = vi.spyOn(getGameBroadcaster(), "publish");
+    await confirmBingoClaim(claim.claim.id, adminId);
 
     const player = await prisma.user.findUniqueOrThrow({ where: { id: playerAId } });
     const winnerCall = publishSpy.mock.calls.find((call) => call[1] === "game:winner");
@@ -334,7 +383,13 @@ describe("ticket purchase validation", () => {
     await prisma.user.delete({ where: { id: poorUserId } });
   });
 
-  it("rejects purchases once registration has closed", async () => {
+  // registrationCloseAt is deliberately NOT a purchase gate (see the
+  // comment on purchaseTickets in tickets.ts) — it's a scheduling default
+  // set once at creation, and an operator who genuinely opened a game for
+  // tickets should never have it silently stop selling hours later with
+  // no visible change in the control panel. `status` (OPEN/FULL, changed
+  // only by the operator's own explicit actions) is the real gate.
+  it("still allows purchases after registrationCloseAt has passed, as long as the game is still OPEN", async () => {
     const now = Date.now();
     const game = await makeGame({
       maxPlayers: 5,
@@ -343,7 +398,21 @@ describe("ticket purchase validation", () => {
     });
     await scheduleGame(game.id, adminId);
     await openGame(game.id, adminId);
-    await expect(purchaseTickets({ gameId: game.id, userId: playerAId, ticketCount: 1 })).rejects.toThrow(/registration has closed/i);
+    const result = await purchaseTickets({ gameId: game.id, userId: playerAId, ticketCount: 1 });
+    expect(result.tickets).toHaveLength(1);
+  });
+
+  it("rejects purchases before registrationOpenAt", async () => {
+    const now = Date.now();
+    const game = await makeGame({
+      maxPlayers: 5,
+      registrationOpenAt: new Date(now + 3_600_000),
+      registrationCloseAt: new Date(now + 7_200_000),
+      startTime: new Date(now + 7_200_000),
+    });
+    await scheduleGame(game.id, adminId);
+    await openGame(game.id, adminId);
+    await expect(purchaseTickets({ gameId: game.id, userId: playerAId, ticketCount: 1 })).rejects.toThrow(/registration has not opened/i);
   });
 
   it("rejects exceeding maxTicketsPerPlayer", async () => {

@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
+import { PERMISSIONS } from "@bingo/shared-types";
 import { getCurrentUser } from "@/lib/current-user";
-import { loadAccessContext } from "@/lib/rbac-server";
+import { hasPermission, loadAccessContext } from "@/lib/rbac-server";
 import { BrandMark } from "@/components/BrandMark";
-import { AdminNav } from "@/components/layout/AdminNav";
+import { AdminNav, type AdminNavVisibility } from "@/components/layout/AdminNav";
 import { TestMoneyBanner } from "@/components/layout/TestMoneyBanner";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
 import { SessionKeepAlive } from "@/components/layout/SessionKeepAlive";
@@ -19,6 +20,19 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!ctx.isSuperAdmin && ctx.roles.length === 0) redirect("/dashboard");
   if (!ctx.isSuperAdmin && ctx.roles.every((r) => r === "PLAYER")) redirect("/dashboard");
 
+  // Only surface nav links this account can actually use — an operator
+  // clicking into Users/Payments/Withdrawals/Finance/Settings would just
+  // hit a permission-denied page, so there's no reason to show them.
+  const visibility: AdminNavVisibility = {
+    games: hasPermission(ctx, PERMISSIONS.GAME_VIEW),
+    createGame: hasPermission(ctx, PERMISSIONS.GAME_CREATE),
+    users: hasPermission(ctx, PERMISSIONS.USER_VIEW),
+    payments: hasPermission(ctx, PERMISSIONS.PAYMENT_VIEW),
+    withdrawals: hasPermission(ctx, PERMISSIONS.WITHDRAWAL_VIEW),
+    finance: hasPermission(ctx, PERMISSIONS.REPORTS_VIEW),
+    settings: hasPermission(ctx, PERMISSIONS.SETTINGS_MANAGE),
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
       <SessionKeepAlive />
@@ -32,7 +46,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               Admin
             </span>
           </div>
-          <AdminNav />
+          <AdminNav visibility={visibility} />
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">{children}</main>

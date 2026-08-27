@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "PlatformLedgerType" ADD VALUE 'PLATFORM_ADJUSTMENT';
+

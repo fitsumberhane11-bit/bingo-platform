@@ -42,9 +42,14 @@ const config: Config = {
           "60%": { transform: "scale(1.08)", opacity: "1" },
           "100%": { transform: "scale(1)", opacity: "1" },
         },
+        "roll-in": {
+          "0%": { transform: "translateX(-24px) rotate(-90deg)", opacity: "0" },
+          "100%": { transform: "translateX(0) rotate(0deg)", opacity: "1" },
+        },
       },
       animation: {
         "ball-pop": "ball-pop 350ms ease-out",
+        "roll-in": "roll-in 420ms cubic-bezier(0.22, 1, 0.36, 1)",
       },
     },
   },
